@@ -1,6 +1,6 @@
 {
-  "name": "Cine Mode",
-  "short_name": "Cine Mode",
+  "name": "Are.Es Cam",
+  "short_name": "Are.Es Cam",
   "description": "A camera that shoots photos with a digital-cinema color look.",
   "start_url": "./",
   "scope": "./",

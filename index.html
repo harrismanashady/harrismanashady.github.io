@@ -3,13 +3,13 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Cine Mode</title>
+<title>Are.Es Cam</title>
 <meta name="description" content="A camera that shoots photos with a digital-cinema color look.">
 <meta name="theme-color" content="#0a0a0b">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="Cine Mode">
+<meta name="apple-mobile-web-app-title" content="Are.Es Cam">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <link rel="icon" type="image/png" href="icons/icon-192.png">
@@ -335,7 +335,7 @@ legend { padding: 0; margin-bottom: 8px; font-weight: 600; }
   </div>
   <button class="rowbtn" id="importPhotoBtn">Grade a photo from your library<small>Pick any photo and apply the current look.</small></button>
   <button class="rowbtn" id="importLutBtn">Import a LUT<small>Load a .cube file, such as a LUT made for RED footage.</small></button>
-  <p class="fine" id="installHint">To keep Cine Mode on your Home Screen: open this page in Safari, tap Share, then Add to Home Screen.</p>
+  <p class="fine" id="installHint">To keep Are.Es Cam on your Home Screen: open this page in Safari, tap Share, then Add to Home Screen.</p>
   <p class="fine" id="srcInfo"></p>
   <div class="sheet-actions"><button class="btn primary" id="moreDone">Done</button></div>
 </section>
@@ -346,7 +346,7 @@ legend { padding: 0; margin-bottom: 8px; font-weight: 600; }
   <p class="error" id="lutError" hidden></p>
   <fieldset id="lutChoice">
     <legend>What footage was this LUT made for?</legend>
-    <label class="opt"><input type="radio" name="lutIn" value="red" checked><span><b>RED Log3G10 / REDWideGamutRGB</b><small>LUTs made for RED camera footage. Cine Mode converts the camera feed to Log3G10 before the LUT.</small></span></label>
+    <label class="opt"><input type="radio" name="lutIn" value="red" checked><span><b>RED Log3G10 / REDWideGamutRGB</b><small>LUTs made for RED camera footage. Are.Es Cam converts the camera feed to Log3G10 before the LUT.</small></span></label>
     <label class="opt"><input type="radio" name="lutIn" value="log"><span><b>Apple Log</b><small>LUTs made for iPhone log video.</small></span></label>
     <label class="opt"><input type="radio" name="lutIn" value="709"><span><b>Normal video (Rec.709)</b><small>Creative LUTs meant for regular, non-log footage.</small></span></label>
   </fieldset>
@@ -569,7 +569,7 @@ function parseCube(text) {
       const [key, ...rest] = line.split(/\s+/);
       if (key === 'TITLE') title = line.slice(5).trim().replace(/^"|"$/g, '');
       else if (key === 'LUT_3D_SIZE') size = parseInt(rest[0], 10);
-      else if (key === 'LUT_1D_SIZE') throw new Error('This is a 1D LUT. Cine Mode needs a 3D LUT.');
+      else if (key === 'LUT_1D_SIZE') throw new Error('This is a 1D LUT. Are.Es Cam needs a 3D LUT.');
       else if (key === 'DOMAIN_MIN') min = rest.slice(0, 3).map(Number);
       else if (key === 'DOMAIN_MAX') max = rest.slice(0, 3).map(Number);
       continue;
@@ -1190,6 +1190,7 @@ function endRegrade() {
 const idb = (() => {
   let dbp = null;
   const open = () => dbp || (dbp = new Promise((res, rej) => {
+    // Storage keeps the app's original name so rolls saved before the rename survive.
     const rq = indexedDB.open('cine-mode', 2);
     rq.onupgradeneeded = () => {
       const db = rq.result;
@@ -1716,7 +1717,7 @@ async function boot() {
   try { ok = initGL(); } catch (err) { console.error(err); }
   if (!ok) {
     setMode('nocam');
-    showNotice('NO GPU', 'Cine Mode can’t run here', 'It needs WebGL 2, which is in Safari on iOS 15 or later. Update your iPhone, then open this page again.', false);
+    showNotice('NO GPU', 'Are.Es Cam can’t run here', 'It needs WebGL 2, which is in Safari on iOS 15 or later. Update your iPhone, then open this page again.', false);
     $('shutter').disabled = true;
     return;
   }

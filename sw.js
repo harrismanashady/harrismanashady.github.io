@@ -1,6 +1,6 @@
-// Keeps Cine Mode working offline. Pages load from the network first so updates arrive;
+// Keeps Are.Es Cam working offline. Pages load from the network first so updates arrive;
 // everything else is served from the cache.
-const CACHE = 'cine-mode-v1';
+const CACHE = 'are-es-cam-v1';
 const ASSETS = [
   './',
   './index.html',
