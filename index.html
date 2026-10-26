@@ -1,0 +1,1733 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Cine Mode</title>
+<meta name="description" content="A camera that shoots photos with a digital-cinema color look.">
+<meta name="theme-color" content="#0a0a0b">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Cine Mode">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" type="image/png" href="icons/icon-192.png">
+<style>
+/* Layout: slim camera HUD on top, full-bleed viewfinder, look strip and control deck below; the deck moves to the right edge in landscape. */
+:root {
+  --ink: #0a0a0b;
+  --panel: #151517;
+  --raise: #202024;
+  --line: #2e2e33;
+  --text: #f2f0ea;
+  --dim: #8f8d96;
+  --rec: #ee2b2f;
+  --rec-soft: rgba(238, 43, 47, 0.16);
+  --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+  --sans: -apple-system, BlinkMacSystemFont, system-ui, "Helvetica Neue", Arial, sans-serif;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html { height: 100%; padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); background: var(--ink); }
+body {
+  height: 100%; margin: 0; overflow: hidden; background: var(--ink); color: var(--text);
+  font: 14px/1.4 var(--sans); -webkit-text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent; overscroll-behavior: none;
+}
+button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; touch-action: manipulation; }
+button:focus-visible, input:focus-visible { outline: 2px solid var(--rec); outline-offset: 2px; }
+.app {
+  height: 100%; display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
+  grid-template-areas: "hud" "view" "looks" "deck";
+  padding-left: env(safe-area-inset-left, 0px); padding-right: env(safe-area-inset-right, 0px);
+  -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
+}
+
+/* HUD */
+.hud {
+  grid-area: hud; display: flex; align-items: stretch; gap: 1px; background: var(--line);
+  border-bottom: 1px solid var(--line); font-family: var(--mono);
+}
+.hud > * { background: #000; flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; justify-content: center; padding: 6px 4px 7px; text-align: center; }
+.hud small { display: block; font: 600 9px/1.2 var(--sans); letter-spacing: 0.1em; color: var(--dim); text-transform: uppercase; }
+.hud b { display: block; font-weight: 500; font-size: 14px; line-height: 1.3; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hud button[aria-expanded="true"] { background: var(--raise); box-shadow: inset 0 -2px 0 var(--rec); }
+.hud button[aria-pressed="true"] b { color: #ffd84a; }
+.tally { flex: 1.25 1 0; }
+.tally b { display: flex; align-items: center; justify-content: center; gap: 6px; }
+.tally i { width: 8px; height: 8px; border-radius: 50%; background: var(--dim); flex: none; }
+[data-mode="live"] .tally i { background: var(--rec); box-shadow: 0 0 8px var(--rec); }
+[data-mode="still"] .tally i { background: #ffd84a; }
+
+/* Viewfinder */
+.view { grid-area: view; position: relative; display: flex; align-items: center; justify-content: center; overflow: hidden; background: #000; }
+#screen { display: block; max-width: 100%; max-height: 100%; background: #000; }
+[data-mode="boot"] #screen, [data-mode="nocam"] #screen { visibility: hidden; }
+.cam-feed { position: absolute; width: 2px; height: 2px; opacity: 0; pointer-events: none; }
+.flash { position: absolute; inset: 0; background: #fff; opacity: 0; pointer-events: none; }
+.flash.on { animation: flash 0.32s ease-out; }
+@keyframes flash { from { opacity: 0.85; } to { opacity: 0; } }
+.toast {
+  position: absolute; top: 12px; left: 50%; transform: translateX(-50%); max-width: calc(100% - 32px);
+  background: rgba(16, 16, 18, 0.92); border: 1px solid var(--line); border-radius: 999px;
+  padding: 6px 14px; font: 500 12px/1.3 var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  transition: opacity 0.25s; pointer-events: none;
+}
+.toast.hide { opacity: 0; }
+.notice { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 24px max(24px, env(safe-area-inset-right, 0px)) 24px max(24px, env(safe-area-inset-left, 0px)); text-align: center; }
+.notice h2 { margin: 0; font-size: 17px; font-weight: 600; text-wrap: balance; }
+.notice p { margin: 0; max-width: 34ch; color: var(--dim); text-wrap: pretty; }
+.frame-corners { position: relative; width: min(64vw, 260px); aspect-ratio: 17 / 9; max-width: 100%; }
+.frame-corners::before, .frame-corners::after { content: ""; position: absolute; inset: 0; border: 2px solid var(--line); clip-path: polygon(0 0, 22% 0, 22% 2px, 2px 2px, 2px 30%, 0 30%, 0 0, 100% 0, 100% 30%, calc(100% - 2px) 30%, calc(100% - 2px) 2px, 78% 2px, 78% 0); }
+.frame-corners::after { transform: rotate(180deg); }
+.frame-corners span { position: absolute; inset: 0; display: grid; place-items: center; font: 500 12px var(--mono); color: var(--dim); letter-spacing: 0.08em; }
+.btn { border-radius: 999px; padding: 9px 18px; background: var(--raise); border: 1px solid var(--line); font-weight: 600; }
+.btn.primary { background: var(--text); color: var(--ink); border-color: var(--text); }
+.btn.danger { background: var(--rec); border-color: var(--rec); color: #fff; }
+
+/* Adjust panel (ISO, WB) */
+.adjust {
+  position: absolute; left: max(12px, env(safe-area-inset-left, 0px)); right: max(12px, env(safe-area-inset-right, 0px)); bottom: 12px;
+  margin-inline: auto; max-width: 460px; background: rgba(16, 16, 18, 0.94); border: 1px solid var(--line);
+  border-radius: 14px; padding: 12px 16px 10px;
+}
+.adj-top { display: flex; align-items: baseline; gap: 10px; }
+.adj-label { font: 600 10px var(--sans); letter-spacing: 0.1em; color: var(--dim); text-transform: uppercase; }
+.adj-value { font: 500 22px var(--mono); font-variant-numeric: tabular-nums; }
+.adj-sub { font: 12px var(--mono); color: var(--dim); flex: 1; }
+.adj-reset { font-size: 13px; color: var(--dim); padding: 4px 2px; }
+.adj-note { margin: 2px 0 6px; font-size: 12px; color: var(--dim); }
+input[type="range"] { -webkit-appearance: none; appearance: none; width: 100%; height: 34px; background: transparent; margin: 0; }
+input[type="range"]::-webkit-slider-runnable-track { height: 6px; border-radius: 3px; background: var(--track, var(--line)); }
+input[type="range"]::-moz-range-track { height: 6px; border-radius: 3px; background: var(--track, var(--line)); }
+input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 24px; height: 24px; margin-top: -9px; border-radius: 50%; background: var(--text); border: 3px solid var(--ink); box-shadow: 0 0 0 1px var(--line); }
+input[type="range"]::-moz-range-thumb { width: 18px; height: 18px; border-radius: 50%; background: var(--text); border: 3px solid var(--ink); }
+.adj-scale { display: flex; justify-content: space-between; font: 11px var(--mono); color: var(--dim); font-variant-numeric: tabular-nums; }
+
+/* Look strip */
+.looks {
+  grid-area: looks; display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none;
+  padding: 10px max(16px, env(safe-area-inset-right, 0px)) 4px max(16px, env(safe-area-inset-left, 0px));
+  scroll-padding-inline: 16px;
+}
+.looks::-webkit-scrollbar { display: none; }
+.chip {
+  flex: none; display: flex; align-items: center; gap: 8px; padding: 7px 12px 7px 9px; border-radius: 10px;
+  background: var(--panel); border: 1px solid var(--line); font: 600 12px var(--sans); letter-spacing: 0.06em; text-transform: uppercase;
+  max-width: 200px;
+}
+.chip span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chip[aria-checked="true"] { border-color: var(--rec); background: var(--rec-soft); }
+.chip.add { color: var(--dim); border-style: dashed; }
+.sw { display: flex; flex: none; }
+.sw i { width: 12px; height: 12px; border-radius: 50%; border: 1.5px solid var(--panel); margin-left: -4px; }
+.sw i:first-child { margin-left: 0; }
+.chip[aria-checked="true"] .sw i { border-color: #2a1416; }
+.sw.lut i { border-radius: 2px; }
+
+/* Control deck */
+.deck {
+  grid-area: deck; display: grid; grid-template-columns: 1fr auto 1fr; grid-template-areas: "modes modes modes" "roll shutter side";
+  align-items: center; row-gap: 8px;
+  padding: 6px max(20px, env(safe-area-inset-right, 0px)) 14px max(20px, env(safe-area-inset-left, 0px));
+}
+.modes { grid-area: modes; justify-self: center; display: flex; gap: 4px; }
+.modes button { padding: 4px 12px; border-radius: 999px; font: 600 11px var(--sans); letter-spacing: 0.14em; text-transform: uppercase; color: var(--dim); }
+.modes button[aria-checked="true"] { color: var(--text); background: var(--raise); }
+[data-mode="still"] .modes { visibility: hidden; }
+.roll { grid-area: roll; justify-self: start; width: 52px; height: 52px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel) center / cover no-repeat; overflow: hidden; position: relative; }
+.roll img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.roll img[src=""] { display: none; }
+.roll-count { position: absolute; right: 3px; bottom: 3px; font: 600 10px var(--mono); background: rgba(0, 0, 0, 0.7); border-radius: 4px; padding: 0 4px; }
+.shutter { grid-area: shutter; width: 78px; height: 78px; border-radius: 50%; border: 4px solid var(--text); display: grid; place-items: center; }
+.shutter span { width: 60px; height: 60px; border-radius: 50%; background: var(--text); transition: transform 0.15s, border-radius 0.2s; display: grid; place-items: center; }
+.shutter:active span { transform: scale(0.88); }
+[data-capture="video"] .shutter span { background: var(--rec); }
+[data-rec="true"] .shutter span { transform: scale(0.5); border-radius: 12px; }
+.shutter svg { display: none; width: 28px; height: 28px; }
+[data-mode="still"] .shutter span { background: var(--text); color: var(--ink); }
+[data-mode="still"] .shutter svg.ok { display: block; }
+[data-mode="nocam"] .shutter span { background: var(--rec); }
+[data-mode="nocam"] .shutter svg.cam { display: block; color: #fff; }
+.shutter:disabled { opacity: 0.4; }
+.side { grid-area: side; justify-self: end; display: flex; gap: 10px; }
+.hud button:disabled, .icon-btn:disabled, .roll:disabled, .modes button:disabled { opacity: 0.35; }
+[data-rec="true"] .tally i { animation: blink 1s steps(2, jump-none) infinite; }
+@keyframes blink { 50% { opacity: 0.15; } }
+.rec-tc {
+  position: absolute; top: 12px; left: max(12px, env(safe-area-inset-left, 0px)); display: flex; align-items: center; gap: 8px;
+  background: rgba(0, 0, 0, 0.62); border: 1px solid rgba(238, 43, 47, 0.6); border-radius: 6px; padding: 4px 10px;
+  font: 500 13px var(--mono); font-variant-numeric: tabular-nums; pointer-events: none;
+}
+.rec-tc i { width: 8px; height: 8px; border-radius: 50%; background: var(--rec); }
+.rec-tc b { color: var(--rec); font-weight: 700; letter-spacing: 0.08em; }
+.icon-btn { width: 44px; height: 44px; border-radius: 50%; background: var(--panel); border: 1px solid var(--line); display: grid; place-items: center; }
+.icon-btn svg { width: 22px; height: 22px; }
+.flip-btn, .discard-btn { display: none; }
+[data-mode="live"] .flip-btn { display: grid; }
+[data-mode="still"] .discard-btn { display: grid; }
+
+@media (orientation: landscape) and (max-height: 560px) {
+  .app { grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: auto minmax(0, 1fr) auto; grid-template-areas: "hud deck" "view deck" "looks deck"; }
+  .deck { grid-template-columns: none; grid-template-rows: 1fr auto auto 1fr; grid-template-areas: "roll" "modes" "shutter" "side"; justify-items: center; row-gap: 10px; padding: 12px max(14px, env(safe-area-inset-right, 0px)) 12px 14px; border-left: 1px solid var(--line); }
+  .modes { flex-direction: column; align-items: center; }
+  .roll { justify-self: center; align-self: start; }
+  .side { justify-self: center; align-self: end; flex-direction: column; }
+  .looks { padding-block: 6px; }
+}
+
+/* Sheets */
+.scrim { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.55); z-index: 20; }
+.sheet {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 21; margin-inline: auto; max-width: 520px; max-height: 88%;
+  overflow-y: auto; background: var(--panel); border: 1px solid var(--line); border-bottom: 0; border-radius: 18px 18px 0 0;
+  padding: 18px max(20px, env(safe-area-inset-right, 0px)) calc(18px + env(safe-area-inset-bottom, 0px)) max(20px, env(safe-area-inset-left, 0px));
+  display: flex; flex-direction: column; gap: 14px;
+}
+.sheet h2 { margin: 0; font-size: 17px; font-weight: 650; }
+.sheet-sub { margin: -8px 0 0; color: var(--dim); font: 12px var(--mono); overflow-wrap: anywhere; }
+.row { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 40px; }
+.row > span { color: var(--text); }
+.seg { display: flex; background: var(--ink); border: 1px solid var(--line); border-radius: 9px; padding: 2px; }
+.seg button { padding: 6px 10px; border-radius: 7px; font-size: 13px; color: var(--dim); }
+.seg button[aria-checked="true"] { background: var(--raise); color: var(--text); }
+.switch { width: 50px; height: 30px; border-radius: 15px; background: var(--line); position: relative; transition: background 0.2s; flex: none; }
+.switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 24px; height: 24px; border-radius: 50%; background: var(--text); transition: transform 0.2s; }
+.switch[aria-checked="true"] { background: var(--rec); }
+.switch[aria-checked="true"]::after { transform: translateX(20px); }
+.rowbtn { text-align: left; padding: 12px 14px; border-radius: 10px; background: var(--raise); border: 1px solid var(--line); font-weight: 600; }
+.rowbtn small { display: block; font-weight: 400; color: var(--dim); font-size: 12px; }
+.fine { margin: 0; font-size: 12px; color: var(--dim); }
+.group { display: flex; flex-direction: column; gap: 12px; padding: 14px; border: 1px solid var(--line); border-radius: 12px; }
+.group-head { display: flex; justify-content: space-between; align-items: baseline; gap: 4px 10px; flex-wrap: wrap; }
+.group-head span { font-weight: 650; }
+.group-head small { font: 11px var(--mono); color: var(--dim); }
+.field { display: flex; flex-direction: column; gap: 6px; }
+.seg.full button { flex: 1 1 0; padding: 7px 2px; white-space: nowrap; font-size: 12px; }
+.opt { display: flex; gap: 12px; align-items: flex-start; padding: 12px; border: 1px solid var(--line); border-radius: 10px; }
+.opt:has(input:checked) { border-color: var(--rec); background: var(--rec-soft); }
+.opt input { margin-top: 3px; accent-color: var(--rec); }
+.opt b { display: block; }
+.opt small { color: var(--dim); }
+fieldset { border: 0; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 8px; }
+legend { padding: 0; margin-bottom: 8px; font-weight: 600; }
+.sheet-actions { display: flex; gap: 10px; justify-content: flex-end; }
+.error { color: #ff8a80; margin: 0; }
+
+/* Roll (gallery) */
+.gallery { position: fixed; inset: 0; z-index: 30; background: var(--ink); display: flex; flex-direction: column; padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
+.g-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px max(16px, env(safe-area-inset-right, 0px)) 12px max(16px, env(safe-area-inset-left, 0px)); border-bottom: 1px solid var(--line); }
+.g-head h2 { margin: 0; font-size: 17px; }
+.g-head span { color: var(--dim); font: 12px var(--mono); }
+.g-grid { flex: 1; overflow-y: auto; display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 3px; padding: 3px max(3px, env(safe-area-inset-right, 0px)) 3px max(3px, env(safe-area-inset-left, 0px)); align-content: start; }
+.g-grid button { aspect-ratio: 1; background: var(--panel); overflow: hidden; position: relative; }
+.g-grid img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.g-dur { position: absolute; right: 4px; bottom: 4px; font: 600 11px var(--mono); background: rgba(0, 0, 0, 0.7); border-radius: 4px; padding: 1px 5px; }
+.g-dur::before { content: "▶ "; font-size: 9px; }
+.g-empty { grid-column: 1 / -1; padding: 48px 16px; text-align: center; color: var(--dim); }
+.viewer { position: absolute; inset: 0; background: #000; display: flex; flex-direction: column; padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
+.v-img { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; padding: 8px; }
+.v-img img { max-width: 100%; max-height: 100%; object-fit: contain; -webkit-touch-callout: default; -webkit-user-select: auto; user-select: auto; }
+.v-img video { max-width: 100%; max-height: 100%; background: #000; }
+.v-meta { padding: 0 max(16px, env(safe-area-inset-right, 0px)) 0 max(16px, env(safe-area-inset-left, 0px)); font: 12px var(--mono); color: var(--dim); overflow-wrap: anywhere; }
+.v-meta b { color: var(--text); font-weight: 500; }
+.v-actions { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; padding: 12px 16px 16px; }
+.v-hint { text-align: center; padding: 0 16px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .flash.on { animation: none; }
+  .shutter span, .switch, .switch::after, .toast { transition: none; }
+  [data-rec="true"] .tally i { animation: none; }
+}
+</style>
+</head>
+<body>
+<div class="app" id="app" data-mode="boot" data-capture="photo" data-rec="false">
+  <header class="hud">
+    <div class="tally"><small>Camera</small><b><i></i><span id="tallyText">BOOT</span></b></div>
+    <button id="hudIso" aria-expanded="false" aria-controls="adjust"><small>ISO</small><b id="isoVal">800</b></button>
+    <button id="hudWb" aria-expanded="false" aria-controls="adjust"><small>WB</small><b id="wbVal">5600K</b></button>
+    <button id="hudFrame" aria-label="Frame aspect ratio"><small>Frame</small><b id="frameVal">17:9</b></button>
+    <button id="hudFc" aria-pressed="false" aria-label="False color exposure view"><small>Expo</small><b>FC</b></button>
+    <div><small>Next</small><b id="clipVal">C0001</b></div>
+  </header>
+
+  <main class="view" id="view">
+    <canvas id="screen" aria-label="Viewfinder"></canvas>
+    <video class="cam-feed" id="feed" playsinline muted autoplay></video>
+    <div class="flash" id="flash"></div>
+    <div class="notice" id="notice">
+      <div class="frame-corners"><span id="noticeTag">STARTING</span></div>
+      <h2 id="noticeTitle">Starting the camera</h2>
+      <p id="noticeText">Allow camera access when your iPhone asks.</p>
+      <button class="btn" id="noticeBtn" hidden>Try live view again</button>
+    </div>
+    <div class="adjust" id="adjust" hidden>
+      <div class="adj-top">
+        <span class="adj-label" id="adjLabel">ISO</span>
+        <span class="adj-value" id="adjValue">800</span>
+        <span class="adj-sub" id="adjSub">±0.0 EV</span>
+        <button class="adj-reset" id="adjReset">Reset</button>
+      </div>
+      <p class="adj-note" id="adjNote"></p>
+      <input type="range" id="adjRange" min="0" max="12" step="1" aria-labelledby="adjLabel">
+      <div class="adj-scale" id="adjScale"></div>
+    </div>
+    <div class="rec-tc" id="recTc" hidden><i></i><b>REC</b><span id="recTime">00:00:00:00</span></div>
+    <div class="toast hide" id="toast" role="status" aria-live="polite"></div>
+  </main>
+
+  <nav class="looks" id="looks" role="radiogroup" aria-label="Look"></nav>
+
+  <footer class="deck">
+    <div class="modes" id="modes" role="radiogroup" aria-label="Capture mode">
+      <button role="radio" data-capture="photo">Photo</button>
+      <button role="radio" data-capture="video">Video</button>
+    </div>
+    <button class="roll" id="rollBtn" aria-label="Open camera roll"><img id="rollThumb" src="" alt=""><span class="roll-count" id="rollCount" hidden></span></button>
+    <button class="shutter" id="shutter" aria-label="Take photo">
+      <span>
+        <svg class="ok" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>
+        <svg class="cam" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h3l1.6-2.2h6.8L17 8h3v11H4z"/><circle cx="12" cy="13.2" r="3.4"/></svg>
+      </span>
+    </button>
+    <div class="side">
+      <button class="icon-btn flip-btn" id="flipBtn" aria-label="Switch camera">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9a8 8 0 0 1 14-3l2 2"/><path d="M20 4v4h-4"/><path d="M20 15a8 8 0 0 1-14 3l-2-2"/><path d="M4 20v-4h4"/></svg>
+      </button>
+      <button class="icon-btn discard-btn" id="discardBtn" aria-label="Discard photo">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+      <button class="icon-btn" id="moreBtn" aria-label="Settings">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.9"/><circle cx="12" cy="12" r="1.9"/><circle cx="19" cy="12" r="1.9"/></svg>
+      </button>
+    </div>
+  </footer>
+</div>
+
+<input type="file" id="pickCamera" accept="image/*" capture="environment" hidden>
+<input type="file" id="pickPhoto" accept="image/*" hidden>
+<input type="file" id="pickLut" hidden>
+
+<div class="scrim" id="scrim" hidden></div>
+
+<section class="sheet" id="moreSheet" hidden aria-labelledby="moreTitle">
+  <h2 id="moreTitle">Camera settings</h2>
+  <div class="group">
+    <div class="group-head"><span>Image pipeline</span><small>REDWideGamutRGB · Log3G10 → Rec.709</small></div>
+    <div class="field"><span id="contrastLabel">Contrast</span><div class="seg full" id="contrastSeg" role="radiogroup" aria-labelledby="contrastLabel"></div></div>
+    <div class="field"><span id="rolloffLabel">Highlight roll-off</span><div class="seg full" id="rolloffSeg" role="radiogroup" aria-labelledby="rolloffLabel"></div></div>
+    <p class="fine">Applies to the built-in looks. An imported LUT sets its own contrast.</p>
+  </div>
+  <div class="row"><span>Film grain</span>
+    <div class="seg" id="grainSeg" role="radiogroup" aria-label="Film grain">
+      <button role="radio" data-v="0">Off</button><button role="radio" data-v="0.45">Fine</button><button role="radio" data-v="0.75">Medium</button><button role="radio" data-v="1.1">Heavy</button>
+    </div>
+  </div>
+  <div class="row"><span id="vigLabel">Lens vignette</span><button class="switch" id="vigSwitch" role="switch" aria-labelledby="vigLabel" aria-checked="true"></button></div>
+  <div class="row"><span>Live view resolution</span>
+    <div class="seg" id="resSeg" role="radiogroup" aria-label="Live view resolution">
+      <button role="radio" data-v="hd">HD</button><button role="radio" data-v="4k">4K</button>
+    </div>
+  </div>
+  <button class="rowbtn" id="importPhotoBtn">Grade a photo from your library<small>Pick any photo and apply the current look.</small></button>
+  <button class="rowbtn" id="importLutBtn">Import a LUT<small>Load a .cube file, such as a LUT made for RED footage.</small></button>
+  <p class="fine" id="installHint">To keep Cine Mode on your Home Screen: open this page in Safari, tap Share, then Add to Home Screen.</p>
+  <p class="fine" id="srcInfo"></p>
+  <div class="sheet-actions"><button class="btn primary" id="moreDone">Done</button></div>
+</section>
+
+<section class="sheet" id="lutSheet" hidden aria-labelledby="lutTitle">
+  <h2 id="lutTitle">Import LUT</h2>
+  <p class="sheet-sub" id="lutInfo"></p>
+  <p class="error" id="lutError" hidden></p>
+  <fieldset id="lutChoice">
+    <legend>What footage was this LUT made for?</legend>
+    <label class="opt"><input type="radio" name="lutIn" value="red" checked><span><b>RED Log3G10 / REDWideGamutRGB</b><small>LUTs made for RED camera footage. Cine Mode converts the camera feed to Log3G10 before the LUT.</small></span></label>
+    <label class="opt"><input type="radio" name="lutIn" value="log"><span><b>Apple Log</b><small>LUTs made for iPhone log video.</small></span></label>
+    <label class="opt"><input type="radio" name="lutIn" value="709"><span><b>Normal video (Rec.709)</b><small>Creative LUTs meant for regular, non-log footage.</small></span></label>
+  </fieldset>
+  <div class="sheet-actions"><button class="btn" id="lutCancel">Cancel</button><button class="btn primary" id="lutUse">Use LUT</button></div>
+</section>
+
+<section class="gallery" id="gallery" hidden aria-labelledby="galleryTitle">
+  <div class="g-head">
+    <div><h2 id="galleryTitle">Roll</h2><span id="galleryCount"></span></div>
+    <button class="btn" id="galleryClose">Close</button>
+  </div>
+  <div class="g-grid" id="galleryGrid"></div>
+  <div class="viewer" id="viewer" hidden>
+    <div class="g-head">
+      <div><h2 id="viewerName"></h2><span id="viewerDims"></span></div>
+      <button class="btn" id="viewerBack">Back</button>
+    </div>
+    <div class="v-img"><img id="viewerImg" alt=""><video id="viewerVideo" controls playsinline hidden></video></div>
+    <p class="v-meta" id="viewerMeta"></p>
+    <p class="fine v-hint" id="viewerHint" hidden>Press and hold the photo, then tap Save to Photos.</p>
+    <div class="v-actions" id="viewerActions">
+      <button class="btn primary" id="viewerSave">Save to Photos</button>
+      <button class="btn" id="viewerRegrade">Re-grade</button>
+      <button class="btn" id="viewerDelete">Delete</button>
+    </div>
+    <div class="v-actions" id="viewerConfirm" hidden>
+      <span>Delete this photo?</span>
+      <button class="btn" id="viewerKeep">Keep</button>
+      <button class="btn danger" id="viewerDeleteYes">Delete</button>
+    </div>
+  </div>
+</section>
+
+<script>
+'use strict';
+const $ = (id) => document.getElementById(id);
+
+/* ---------- Preferences ---------- */
+const prefs = {
+  get(k, d) { try { const v = localStorage.getItem('cine.' + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v) { try { localStorage.setItem('cine.' + k, JSON.stringify(v)); } catch {} },
+};
+
+const ISOS = [200, 250, 320, 400, 500, 640, 800, 1000, 1280, 1600, 2000, 2500, 3200];
+const KELVINS = [2800, 3200, 3600, 4000, 4400, 4800, 5200, 5600, 6000, 6500, 7000, 7500, 8000];
+const FRAMES = [
+  { id: '17:9', ratio: 4096 / 2160 },
+  { id: '2.39', ratio: 2.39 },
+  { id: '1.85', ratio: 1.85 },
+  { id: '16:9', ratio: 16 / 9 },
+  { id: 'FULL', ratio: 0 },
+];
+// Output tone controls, named like a cinema camera's image pipeline menu.
+const CONTRASTS = [
+  { id: 'low', label: 'Low', k: 0.8 }, { id: 'medlow', label: 'Med-Low', short: 'Med-Lo', k: 0.9 }, { id: 'medium', label: 'Medium', k: 1 },
+  { id: 'medhigh', label: 'Med-High', short: 'Med-Hi', k: 1.1 }, { id: 'high', label: 'High', k: 1.2 },
+];
+const ROLLOFFS = [
+  { id: 'hard', label: 'Hard', k: 0.5 }, { id: 'medium', label: 'Medium', k: 0.75 }, { id: 'soft', label: 'Soft', k: 1 }, { id: 'vsoft', label: 'Very Soft', k: 1.6 },
+];
+// Settings a shot remembers so it can be re-graded later, like a RAW clip.
+const GRADE_KEYS = ['look', 'iso', 'kelvin', 'frame', 'grain', 'vignette', 'contrast', 'rolloff'];
+
+const state = {
+  mode: 'boot',            // boot | live | still | nocam
+  look: prefs.get('look', 'cine'),
+  iso: prefs.get('iso', 800),
+  kelvin: prefs.get('kelvin', 5600),
+  frame: prefs.get('frame', '17:9'),
+  grain: prefs.get('grain', 0.45),
+  vignette: prefs.get('vignette', true),
+  res: prefs.get('res', '4k'),
+  facing: prefs.get('facing', 'environment'),
+  contrast: prefs.get('contrast', 'medium'),
+  rolloff: prefs.get('rolloff', 'soft'),
+  capture: prefs.get('capture', 'photo'), // photo | video
+  falseColor: false,
+  editing: null,           // shot being re-graded from its source frame
+};
+
+/* ---------- Color science ----------
+   The pipeline follows RED's published color science:
+   camera feed -> scene linear -> REDWideGamutRGB -> Log3G10 -> 3D LUT -> display.
+   Built-in looks are baked into LUTs from the grade() function below, so they take
+   the same Log3G10 input as a LUT made for RED footage. */
+const L3 = { a: 0.224282, b: 155.975327, c: 0.01, g: 15.1927 }; // Log3G10: 18% grey -> 1/3, 10 stops above grey -> 1
+const log3g10Decode = (y) => (y < 0 ? y / L3.g - L3.c : (10 ** (y / L3.a) - 1) / L3.b - L3.c);
+const srgbToLin = (v) => (v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
+const linToSrgb = (v) => (v <= 0.0031308 ? 12.92 * Math.max(v, 0) : 1.055 * v ** (1 / 2.4) - 0.055);
+const lum = (r, g, b) => 0.2126 * r + 0.7152 * g + 0.0722 * b;
+const clamp01 = (v) => Math.min(1, Math.max(0, v));
+const smooth = (a, b, x) => { const t = clamp01((x - a) / (b - a)); return t * t * (3 - 2 * t); };
+
+// The camera feed is display-referred; this restores highlight range so the
+// tone curve can roll it off softly. Mid grey (0.18) is left where it is.
+const EXPAND_MAX = 6;
+const EXPAND_A = 1 - 1 / EXPAND_MAX;
+const expandLinear = (m) => (m * (1 - EXPAND_A * 0.18)) / (1 - EXPAND_A * Math.min(m, 0.999));
+
+function toOklab(r, g, b) {
+  const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b);
+  const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
+  const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
+  return [0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s,
+    1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s,
+    0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s];
+}
+function fromOklab(L, a, b) {
+  const l = (L + 0.3963377774 * a + 0.2158037573 * b) ** 3;
+  const m = (L - 0.1055613458 * a - 0.0638541728 * b) ** 3;
+  const s = (L - 0.0894841775 * a - 1.291485548 * b) ** 3;
+  return [4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
+    -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
+    -0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s];
+}
+
+// Log-logistic tone curve: maps scene-linear 0.18 to `mid` (display linear)
+// and scene-linear `white` to 1.0, with a soft shoulder in between.
+function makeTone({ contrast: n, mid, white }) {
+  const f = (x, sn) => { const xn = x ** n; return xn / (xn + sn); };
+  let lo = Math.log(0.001), hi = Math.log(1000);
+  for (let i = 0; i < 64; i++) {
+    const m = (lo + hi) / 2, sn = Math.exp(m * n);
+    if (f(0.18, sn) / f(white, sn) > mid) lo = m; else hi = m;
+  }
+  const sn = Math.exp(((lo + hi) / 2) * n), norm = f(white, sn);
+  return (x) => (x <= 0 ? 0 : Math.min(f(x, sn) / norm, 1));
+}
+
+// A look's tone curve, scaled by the pipeline's contrast and highlight roll-off settings.
+function lookTone(look) {
+  const c = CONTRASTS.find((x) => x.id === state.contrast) || CONTRASTS[2];
+  const r = ROLLOFFS.find((x) => x.id === state.rolloff) || ROLLOFFS[2];
+  return makeTone({ contrast: look.contrast * c.k, mid: look.mid, white: look.white * r.k });
+}
+
+// Hue angles are Oklab degrees: red ~29, skin ~55, yellow ~110, green ~142, cyan ~195, blue ~264.
+const LOOKS = [
+  { id: 'cine', name: 'Cine', contrast: 1.32, mid: 0.17, white: 8, perChannel: 0.4, sat: 1, wb: [1, 1, 1],
+    hues: [{ h: 142, w: 30, shift: -8, sat: 0.92 }, { h: 255, w: 32, shift: -7, sat: 1 }, { h: 55, w: 24, shift: -2, sat: 1.02 }, { h: 29, w: 20, shift: 3, sat: 0.92 }],
+    shadow: [-0.012, 0.002, 0.02], high: [0.02, 0.006, -0.022], lift: 0.008 },
+  { id: 'golden', name: 'Golden', contrast: 1.28, mid: 0.17, white: 8, perChannel: 0.5, sat: 1, wb: [1.07, 1, 0.88],
+    hues: [{ h: 142, w: 34, shift: -16, sat: 0.86 }, { h: 255, w: 30, shift: -10, sat: 0.9 }, { h: 55, w: 26, shift: -3, sat: 1.04 }, { h: 29, w: 20, shift: 4, sat: 0.92 }],
+    shadow: [0.012, 0.004, -0.008], high: [0.035, 0.014, -0.035], lift: 0.022 },
+  { id: 'teal', name: 'Teal & Amber', contrast: 1.45, mid: 0.16, white: 7, perChannel: 0.45, sat: 1.06, wb: [1, 1, 1],
+    hues: [{ h: 264, w: 40, shift: -42, sat: 0.95 }, { h: 142, w: 34, shift: 34, sat: 0.78 }, { h: 195, w: 22, shift: 6, sat: 1 }, { h: 58, w: 30, shift: -5, sat: 1.14 }, { h: 29, w: 18, shift: 6, sat: 0.92 }],
+    shadow: [-0.045, 0.012, 0.035], high: [0.045, 0.012, -0.045], lift: 0.008 },
+  { id: 'bleach', name: 'Bleach', contrast: 1.85, mid: 0.15, white: 6, perChannel: 0.3, sat: 0.52, wb: [0.98, 1, 1.02],
+    hues: [], shadow: [-0.006, 0, 0.01], high: [0, 0, 0], lift: 0 },
+  { id: 'noir', name: 'Noir', contrast: 1.6, mid: 0.16, white: 6, perChannel: 0, sat: 0, wb: [1, 1, 1], mono: [0.5, 0.42, 0.08],
+    hues: [], shadow: [0, 0, 0], high: [0, 0, 0], lift: 0.012 },
+];
+
+// Grade one scene-linear Rec.709 color into display sRGB (0..1).
+function grade(r, g, b, look, tone) {
+  r = Math.max(r, 0) * look.wb[0]; g = Math.max(g, 0) * look.wb[1]; b = Math.max(b, 0) * look.wb[2];
+  if (look.mono) {
+    r = g = b = r * look.mono[0] + g * look.mono[1] + b * look.mono[2];
+  } else {
+    const [L, A, B] = toOklab(r, g, b);
+    let C = Math.hypot(A, B), h = (Math.atan2(B, A) * 180) / Math.PI, sat = look.sat;
+    for (const rule of look.hues) {
+      let d = h - rule.h; d -= 360 * Math.round(d / 360);
+      const w = Math.exp(-((d / rule.w) ** 2));
+      h += rule.shift * w; sat *= 1 + (rule.sat - 1) * w;
+    }
+    C *= sat * (0.82 + 0.18 * smooth(0.12, 0.45, L)); // calmer color in deep shadows
+    [r, g, b] = fromOklab(L, C * Math.cos((h * Math.PI) / 180), C * Math.sin((h * Math.PI) / 180));
+    const lo = Math.min(r, g, b);
+    if (lo < 0) { // pull out-of-gamut colors toward grey instead of clipping a channel
+      const y = Math.max(lum(r, g, b), 0), t = y > 0 ? y / (y - lo) : 0;
+      r = y + (r - y) * t; g = y + (g - y) * t; b = y + (b - y) * t;
+    }
+  }
+  const y = lum(r, g, b), k = y > 1e-6 ? tone(y) / y : 0, pc = look.perChannel;
+  const out = [r * k * (1 - pc) + tone(r) * pc, g * k * (1 - pc) + tone(g) * pc, b * k * (1 - pc) + tone(b) * pc].map((v) => linToSrgb(clamp01(v)));
+  const e = lum(out[0], out[1], out[2]), ws = (1 - e) ** 3, wh = e ** 3;
+  for (let i = 0; i < 3; i++) out[i] = look.lift + clamp01(out[i] + look.shadow[i] * ws + look.high[i] * wh) * (1 - look.lift);
+  return out;
+}
+
+// Camera footage only spans about 0.09-0.65 of the Log3G10 range, so the LUT needs a dense grid.
+const LUT_N = 65;
+function bakeLook(look) {
+  const tone = lookTone(look), N = LUT_N, data = new Float32Array(N * N * N * 4), dec = [];
+  for (let i = 0; i < N; i++) dec.push(log3g10Decode(i / (N - 1)));
+  let p = 0;
+  for (let bi = 0; bi < N; bi++) for (let gi = 0; gi < N; gi++) for (let ri = 0; ri < N; ri++) {
+    const R = dec[ri], G = dec[gi], B = dec[bi];
+    // REDWideGamutRGB -> Rec.709 linear
+    const o = grade(1.981976018 * R - 0.900431837 * G - 0.081544181 * B, -0.178143182 * R + 1.500468358 * G - 0.322325176 * B, -0.101795966 * R - 0.535263459 * G + 1.637059425 * B, look, tone);
+    data[p++] = o[0]; data[p++] = o[1]; data[p++] = o[2]; data[p++] = 1;
+  }
+  return data;
+}
+
+// Three reference colors (skin, foliage, sky) previewed through a look for its chip.
+function lookSwatches(look) {
+  const tone = lookTone(look);
+  return [[0.80, 0.58, 0.47], [0.36, 0.47, 0.22], [0.46, 0.63, 0.86]].map((c) => {
+    const lin = c.map(srgbToLin), m = Math.max(...lin), f = expandLinear(m) / m;
+    const o = grade(lin[0] * f, lin[1] * f, lin[2] * f, look, tone);
+    return `rgb(${o.map((v) => Math.round(v * 255)).join(',')})`;
+  });
+}
+
+function wbGains(kelvin) {
+  const d = 1e6 / 5600 - 1e6 / kelvin; // mired shift, positive = warmer
+  const r = Math.exp(0.0027 * d), b = Math.exp(-0.004 * d), y = lum(r, 1, b);
+  return [r / y, 1 / y, b / y];
+}
+
+/* ---------- .cube parser ---------- */
+function parseCube(text) {
+  let size = 0, title = '', min = [0, 0, 0], max = [1, 1, 1], n = 0, data = null;
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line || line[0] === '#') continue;
+    if (/^[A-Za-z_]/.test(line)) {
+      const [key, ...rest] = line.split(/\s+/);
+      if (key === 'TITLE') title = line.slice(5).trim().replace(/^"|"$/g, '');
+      else if (key === 'LUT_3D_SIZE') size = parseInt(rest[0], 10);
+      else if (key === 'LUT_1D_SIZE') throw new Error('This is a 1D LUT. Cine Mode needs a 3D LUT.');
+      else if (key === 'DOMAIN_MIN') min = rest.slice(0, 3).map(Number);
+      else if (key === 'DOMAIN_MAX') max = rest.slice(0, 3).map(Number);
+      continue;
+    }
+    if (!data) {
+      if (!(size >= 2 && size <= 129)) throw new Error('The file has no valid LUT_3D_SIZE line.');
+      data = new Float32Array(size * size * size * 4);
+    }
+    const v = line.split(/\s+/).map(Number);
+    if (v.length < 3 || v.slice(0, 3).some((x) => !Number.isFinite(x))) throw new Error('A line in the LUT could not be read: ' + line.slice(0, 40));
+    if (n >= size * size * size) throw new Error('The LUT has more entries than its size allows.');
+    data[n * 4] = v[0]; data[n * 4 + 1] = v[1]; data[n * 4 + 2] = v[2]; data[n * 4 + 3] = 1; n++;
+  }
+  if (!data || n !== size * size * size) throw new Error(`The LUT should have ${size ** 3 || 'N³'} entries but has ${n}.`);
+  if ([0, 1, 2].some((i) => !(max[i] > min[i]))) throw new Error('The LUT domain is invalid.');
+  return { size, title, min, max, data };
+}
+
+/* ---------- WebGL ---------- */
+const canvas = $('screen');
+const gl = canvas.getContext('webgl2', { alpha: false, antialias: false, premultipliedAlpha: false, preserveDrawingBuffer: false });
+
+const VS = `#version 300 es
+in vec2 aPos;
+uniform vec4 uCrop;
+uniform vec2 uFlip;
+out vec2 vSrc;
+out vec2 vFrame;
+void main() {
+  vec2 t = aPos * 0.5 + 0.5;
+  vFrame = vec2(t.x, 1.0 - t.y);
+  vec2 f = vec2(mix(t.x, 1.0 - t.x, uFlip.x), mix(1.0 - t.y, t.y, uFlip.y));
+  vSrc = uCrop.xy + f * uCrop.zw;
+  gl_Position = vec4(aPos, 0.0, 1.0);
+}`;
+
+const FS = `#version 300 es
+precision highp float;
+precision highp sampler3D;
+in vec2 vSrc;
+in vec2 vFrame;
+uniform sampler2D uImage;
+uniform sampler3D uLut;
+uniform float uLutSize;
+uniform vec3 uLutMin;
+uniform vec3 uLutMax;
+uniform float uInput;     // 0 Rec.709 video, 1 Apple Log, 2 RED Log3G10 / REDWideGamutRGB
+uniform float uExpandA;
+uniform float uExposure;
+uniform vec3 uWB;
+uniform float uGrain;
+uniform float uSeed;
+uniform float uAspect;
+uniform float uVignette;
+uniform float uFalseColor;
+out vec4 outColor;
+
+const mat3 M709to2020 = mat3(
+  0.627403896, 0.069097289, 0.016391439,
+  0.329283039, 0.919540395, 0.088013308,
+  0.043313065, 0.011362316, 0.895595253);
+const mat3 M709toRWG = mat3(
+  0.541946184, 0.07698933, 0.058872335,
+  0.36014816, 0.767968312, 0.273494657,
+  0.097905656, 0.155042358, 0.667633009);
+
+vec3 srgbToLin(vec3 c) { return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c)); }
+vec3 linToSrgb(vec3 c) { c = max(c, 0.0); return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c)); }
+float appleLog(float r) {
+  if (r >= 0.01) return 0.08550479 * log2(r + 0.00964052) + 0.69336945;
+  float d = max(r + 0.05641088, 0.0);
+  return 47.28711236 * d * d;
+}
+float log3g10(float x) {
+  x += 0.01;
+  return x < 0.0 ? x * 15.1927 : 0.224282 * 0.30102999566 * log2(155.975327 * x + 1.0);
+}
+float hash(vec2 p) {
+  vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+  p3 += dot(p3, p3.yzx + 33.33);
+  return fract((p3.x + p3.y) * p3.z);
+}
+
+void main() {
+  vec3 lin = srgbToLin(texture(uImage, vSrc).rgb);
+  if (uExpandA > 0.0) {
+    float m = max(max(lin.r, lin.g), lin.b);
+    float me = m * (1.0 - uExpandA * 0.18) / (1.0 - uExpandA * min(m, 0.999));
+    lin *= m > 1e-5 ? me / m : 1.0;
+  }
+  lin *= uWB * uExposure;
+  vec3 enc;
+  if (uInput > 1.5) {
+    vec3 w = M709toRWG * lin;
+    enc = vec3(log3g10(w.r), log3g10(w.g), log3g10(w.b));
+  } else if (uInput > 0.5) {
+    vec3 w = M709to2020 * lin;
+    enc = vec3(appleLog(w.r), appleLog(w.g), appleLog(w.b));
+  } else {
+    enc = linToSrgb(lin);
+  }
+  enc = clamp((enc - uLutMin) / (uLutMax - uLutMin), 0.0, 1.0);
+  vec3 o = texture(uLut, enc * ((uLutSize - 1.0) / uLutSize) + 0.5 / uLutSize).rgb;
+
+  vec2 q = (vFrame - 0.5) * vec2(uAspect, 1.0);
+  float r = length(q) / length(vec2(uAspect, 1.0) * 0.5);
+  o *= 1.0 - uVignette * 0.32 * pow(r, 2.4);
+
+  if (uGrain > 0.0) {
+    vec2 cell = floor(vFrame * vec2(1500.0 * uAspect, 1500.0));
+    float n = hash(cell + uSeed) + hash(cell * 1.37 + uSeed * 1.71) - 1.0;
+    float y = dot(o, vec3(0.2126, 0.7152, 0.0722));
+    o += n * uGrain * 0.055 * (0.35 + 2.6 * y * (1.0 - y));
+  }
+
+  if (uFalseColor > 0.5) {
+    float y = dot(clamp(o, 0.0, 1.0), vec3(0.2126, 0.7152, 0.0722));
+    vec3 fc = vec3(y * 0.8 + 0.05);
+    if (y < 0.03) fc = vec3(0.5, 0.12, 0.7);
+    else if (y < 0.1) fc = vec3(0.12, 0.38, 0.95);
+    else if (y > 0.41 && y < 0.47) fc = vec3(0.2, 0.82, 0.3);
+    else if (y > 0.6 && y < 0.66) fc = vec3(1.0, 0.5, 0.72);
+    else if (y > 0.98) fc = vec3(0.95, 0.15, 0.1);
+    else if (y > 0.93) fc = vec3(1.0, 0.86, 0.1);
+    o = fc;
+  }
+  outColor = vec4(clamp(o, 0.0, 1.0), 1.0);
+}`;
+
+const GL = {};
+function initGL() {
+  if (!gl) return false;
+  const compile = (type, src) => {
+    const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+    return s;
+  };
+  const prog = gl.createProgram();
+  gl.attachShader(prog, compile(gl.VERTEX_SHADER, VS));
+  gl.attachShader(prog, compile(gl.FRAGMENT_SHADER, FS));
+  gl.linkProgram(prog);
+  if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
+  GL.prog = prog;
+  GL.u = {};
+  for (const name of ['uCrop', 'uFlip', 'uImage', 'uLut', 'uLutSize', 'uLutMin', 'uLutMax', 'uInput', 'uExpandA', 'uExposure', 'uWB', 'uGrain', 'uSeed', 'uAspect', 'uVignette', 'uFalseColor']) {
+    GL.u[name] = gl.getUniformLocation(prog, name);
+  }
+  GL.vao = gl.createVertexArray();
+  gl.bindVertexArray(GL.vao);
+  const buf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+  const loc = gl.getAttribLocation(prog, 'aPos');
+  gl.enableVertexAttribArray(loc);
+  gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+
+  GL.frameTex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, GL.frameTex);
+  for (const [k, v] of [[gl.TEXTURE_MIN_FILTER, gl.LINEAR], [gl.TEXTURE_MAG_FILTER, gl.LINEAR], [gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE], [gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE]]) gl.texParameteri(gl.TEXTURE_2D, k, v);
+  GL.maxTex = Math.min(gl.getParameter(gl.MAX_TEXTURE_SIZE), gl.getParameter(gl.MAX_RENDERBUFFER_SIZE));
+  return true;
+}
+
+function makeLutTexture(size, data) {
+  const tex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_3D, tex);
+  gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+  gl.texImage3D(gl.TEXTURE_3D, 0, gl.RGBA16F, size, size, size, 0, gl.RGBA, gl.FLOAT, data);
+  for (const [k, v] of [[gl.TEXTURE_MIN_FILTER, gl.LINEAR], [gl.TEXTURE_MAG_FILTER, gl.LINEAR], [gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE], [gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE], [gl.TEXTURE_WRAP_R, gl.CLAMP_TO_EDGE]]) gl.texParameteri(gl.TEXTURE_3D, k, v);
+  return tex;
+}
+
+const INPUTS = { '709': 0, log: 1, red: 2 }; // what a LUT expects as input; 'log' is Apple Log
+const lutCache = new Map(); // look id -> {key, tex, size, min, max, input}
+let customLut = null;       // {title, size, min, max, input, data}
+
+function activeLut() {
+  if (state.look === 'custom' && customLut) {
+    if (!lutCache.has('custom')) {
+      lutCache.set('custom', { key: 'custom', tex: makeLutTexture(customLut.size, customLut.data), size: customLut.size, min: customLut.min, max: customLut.max, input: INPUTS[customLut.input] ?? INPUTS.red });
+    }
+    return lutCache.get('custom');
+  }
+  const look = LOOKS.find((l) => l.id === state.look) || LOOKS[0];
+  const key = `${look.id}|${state.contrast}|${state.rolloff}`;
+  let lut = lutCache.get(look.id);
+  if (!lut || lut.key !== key) {
+    if (lut) gl.deleteTexture(lut.tex);
+    lut = { key, tex: makeLutTexture(LUT_N, bakeLook(look)), size: LUT_N, min: [0, 0, 0], max: [1, 1, 1], input: INPUTS.red };
+    lutCache.set(look.id, lut);
+  }
+  return lut;
+}
+
+/* ---------- Source, framing and drawing ---------- */
+const video = $('feed');
+const stillCanvas = document.createElement('canvas');
+let stream = null;
+let geo = null; // {crop:[x,y,w,h], outW, outH, aspect}
+
+function sourceSize() {
+  if (state.mode === 'live' && video.videoWidth) return [video.videoWidth, video.videoHeight];
+  if (state.mode === 'still') return [stillCanvas.width, stillCanvas.height];
+  return null;
+}
+
+function computeGeometry() {
+  const size = sourceSize();
+  if (!size) { geo = null; return; }
+  const [sw, sh] = size;
+  const frame = FRAMES.find((f) => f.id === state.frame) || FRAMES[0];
+  let target = frame.ratio ? (sw >= sh ? frame.ratio : 1 / frame.ratio) : sw / sh;
+  let cw = sw, ch = sh;
+  if (sw / sh > target) cw = sh * target; else ch = sw / target;
+  cw = Math.round(cw); ch = Math.round(ch);
+  geo = { crop: [(sw - cw) / 2 / sw, (sh - ch) / 2 / sh, cw / sw, ch / sh], outW: cw, outH: ch, aspect: cw / ch };
+}
+
+function layout() {
+  if (!recording) computeGeometry(); // the frame is locked while a clip records
+  if (!geo) return;
+  const view = $('view'), vw = view.clientWidth, vh = view.clientHeight;
+  let w = vw, h = vw / geo.aspect;
+  if (h > vh) { h = vh; w = vh * geo.aspect; }
+  canvas.style.width = Math.floor(w) + 'px';
+  canvas.style.height = Math.floor(h) + 'px';
+  let pw, ph;
+  if (state.capture === 'video' && state.mode === 'live') {
+    [pw, ph] = recordingSize(); // video records straight from this canvas
+  } else {
+    const dpr = Math.min(window.devicePixelRatio || 1, 3);
+    pw = Math.max(1, Math.min(Math.round(w * dpr), geo.outW));
+    ph = Math.max(1, Math.round(pw / geo.aspect));
+  }
+  // Assigning a size clears the canvas, even when it is unchanged.
+  if (canvas.width !== pw) canvas.width = pw;
+  if (canvas.height !== ph) canvas.height = ph;
+  requestRender();
+}
+
+function uploadSource(el) {
+  gl.bindTexture(gl.TEXTURE_2D, GL.frameTex);
+  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, el);
+}
+
+function draw(w, h, { capture = false, mirror = false, seed = Math.random() * 500 } = {}) {
+  const lut = activeLut(), u = GL.u;
+  gl.viewport(0, 0, w, h);
+  gl.useProgram(GL.prog);
+  gl.bindVertexArray(GL.vao);
+  gl.uniform4fv(u.uCrop, geo.crop);
+  gl.uniform2f(u.uFlip, mirror ? 1 : 0, capture ? 1 : 0);
+  gl.uniform1i(u.uImage, 0);
+  gl.uniform1i(u.uLut, 1);
+  gl.uniform1f(u.uLutSize, lut.size);
+  gl.uniform3fv(u.uLutMin, lut.min);
+  gl.uniform3fv(u.uLutMax, lut.max);
+  gl.uniform1f(u.uInput, lut.input);
+  gl.uniform1f(u.uExpandA, lut.input > 0 ? EXPAND_A : 0);
+  gl.uniform1f(u.uExposure, state.iso / 800);
+  gl.uniform3fv(u.uWB, wbGains(state.kelvin));
+  gl.uniform1f(u.uGrain, state.grain);
+  gl.uniform1f(u.uSeed, seed);
+  gl.uniform1f(u.uAspect, geo.aspect);
+  gl.uniform1f(u.uVignette, state.vignette ? 1 : 0);
+  gl.uniform1f(u.uFalseColor, !capture && state.falseColor ? 1 : 0);
+  gl.activeTexture(gl.TEXTURE1);
+  gl.bindTexture(gl.TEXTURE_3D, lut.tex);
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, GL.frameTex);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+}
+
+let renderQueued = false;
+function requestRender() {
+  if (state.mode !== 'still' || renderQueued) return; // live view redraws on every camera frame
+  renderQueued = true;
+  requestAnimationFrame(() => {
+    renderQueued = false;
+    if (state.mode === 'still' && geo) { gl.bindFramebuffer(gl.FRAMEBUFFER, null); draw(canvas.width, canvas.height, { seed: 7 }); }
+  });
+}
+
+let loopToken = 0;
+function startLoop() {
+  const token = ++loopToken;
+  const next = () => (video.requestVideoFrameCallback ? video.requestVideoFrameCallback(tick) : requestAnimationFrame(tick));
+  const tick = () => {
+    if (token !== loopToken || state.mode !== 'live') return;
+    if (video.readyState >= 2 && video.videoWidth) {
+      const src = video.videoWidth + 'x' + video.videoHeight;
+      if (!geo || canvas.dataset.src !== src) {
+        if (recording && canvas.dataset.src) stopRecording('The phone rotated, so the clip ended.');
+        canvas.dataset.src = src;
+        layout();
+      }
+      uploadSource(video);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      draw(canvas.width, canvas.height, { mirror: state.facing === 'user' });
+      if (wantRecThumb) { wantRecThumb = false; recThumb = snapshotThumb(); }
+    }
+    next();
+  };
+  next();
+}
+
+// Copy the current camera frame into stillCanvas. It becomes the shot's ungraded source.
+function grabLiveFrame() {
+  const w = video.videoWidth, h = video.videoHeight;
+  stillCanvas.width = w; stillCanvas.height = h;
+  const ctx = stillCanvas.getContext('2d');
+  if (state.facing === 'user') { ctx.translate(w, 0); ctx.scale(-1, 1); }
+  ctx.drawImage(video, 0, 0, w, h);
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+}
+
+const toJpeg = (c, quality) => new Promise((res, rej) => c.toBlob((b) => (b ? res(b) : rej(new Error('Could not encode the photo.'))), 'image/jpeg', quality));
+
+// Grade stillCanvas at full resolution off screen and encode it as a JPEG.
+async function renderPhoto() {
+  let w = geo.outW, h = geo.outH;
+  const cap = Math.min(GL.maxTex, 4096);
+  if (Math.max(w, h) > cap) { const s = cap / Math.max(w, h); w = Math.round(w * s); h = Math.round(h * s); }
+  const tex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, tex);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+  const fbo = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+  uploadSource(stillCanvas);
+  draw(w, h, { capture: true });
+  const px = new Uint8ClampedArray(w * h * 4);
+  gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, px);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.deleteFramebuffer(fbo);
+  gl.deleteTexture(tex);
+
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  c.getContext('2d').putImageData(new ImageData(px, w, h), 0, 0);
+  const blob = await toJpeg(c, 0.92);
+  const t = document.createElement('canvas'), ts = 320 / Math.max(w, h);
+  t.width = Math.round(w * ts); t.height = Math.round(h * ts);
+  t.getContext('2d').drawImage(c, 0, 0, t.width, t.height);
+  const thumb = await new Promise((res) => t.toBlob(res, 'image/jpeg', 0.8));
+  c.width = c.height = 0;
+  return { blob, thumb, w, h };
+}
+
+/* ---------- Video ----------
+   Clips record straight from the graded viewfinder canvas, so the look, grain and
+   vignette are in the file, with sound from the microphone. */
+const REC_LONG_SIDE = 1920;
+const REC_MAX_SECONDS = 180; // recordings are held in memory until they stop
+let recording = false, recorder = null, recChunks = [], recStart = 0, recTimer = 0;
+let recThumb = null, wantRecThumb = false, recNote = '';
+let micStream = null;
+
+function recordingSize() {
+  const s = Math.min(1, REC_LONG_SIDE / Math.max(geo.outW, geo.outH));
+  const even = (v) => Math.max(2, Math.round((v * s) / 2) * 2); // video encoders need even sizes
+  return [even(geo.outW), even(geo.outH)];
+}
+
+function recorderType() {
+  for (const t of ['video/mp4;codecs="avc1,mp4a.40.2"', 'video/mp4', 'video/webm;codecs="vp9,opus"', 'video/webm']) {
+    if (MediaRecorder.isTypeSupported(t)) return t;
+  }
+  return '';
+}
+
+async function ensureMic() {
+  if (micStream || state.capture !== 'video' || state.mode !== 'live') return;
+  try {
+    micStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    if (state.capture !== 'video' || state.mode !== 'live') releaseMic();
+  } catch {
+    toast('No microphone access. Video will record without sound.');
+  }
+}
+
+function releaseMic() {
+  if (micStream) { micStream.getTracks().forEach((t) => t.stop()); micStream = null; }
+}
+
+function snapshotThumb() {
+  const t = document.createElement('canvas'), s = 320 / Math.max(canvas.width, canvas.height);
+  t.width = Math.round(canvas.width * s); t.height = Math.round(canvas.height * s);
+  t.getContext('2d').drawImage(canvas, 0, 0, t.width, t.height);
+  return new Promise((res) => t.toBlob(res, 'image/jpeg', 0.8));
+}
+
+function startRecording() {
+  if (!window.MediaRecorder || !canvas.captureStream) { toast('Video recording needs iOS 14.3 or later.'); return; }
+  state.falseColor = false; // false color is for monitoring only
+  syncHud();
+  const out = canvas.captureStream(30);
+  const tracks = [...out.getVideoTracks(), ...(micStream ? micStream.getAudioTracks() : [])];
+  const type = recorderType();
+  try {
+    recorder = new MediaRecorder(new MediaStream(tracks), { ...(type && { mimeType: type }), videoBitsPerSecond: 10_000_000 });
+  } catch {
+    out.getTracks().forEach((t) => t.stop());
+    toast('This browser cannot record video.');
+    return;
+  }
+  recChunks = [];
+  recorder.ondataavailable = (e) => { if (e.data && e.data.size) recChunks.push(e.data); };
+  recorder.onstop = () => finishRecording(out);
+  recorder.start(1000);
+  recording = true;
+  recStart = performance.now();
+  recThumb = null; wantRecThumb = true; recNote = '';
+  setRecordingUi(true);
+  recTimer = setInterval(updateTimecode, 100);
+  updateTimecode();
+}
+
+function stopRecording(note = '') {
+  if (!recording) return;
+  recording = false;
+  recNote = note;
+  clearInterval(recTimer);
+  if (recorder.state !== 'inactive') recorder.stop();
+}
+
+async function finishRecording(out) {
+  const seconds = (performance.now() - recStart) / 1000;
+  const type = (recorder.mimeType || (recChunks[0] && recChunks[0].type) || 'video/mp4').split(';')[0];
+  const blob = new Blob(recChunks, { type });
+  const thumb = (await recThumb) || (await snapshotThumb());
+  recorder = null; recChunks = [];
+  out.getTracks().forEach((t) => t.stop());
+  setRecordingUi(false);
+  if (!blob.size) { toast('Nothing was recorded.'); return; }
+  try {
+    const rec = await storeShot({ blob, thumb, w: canvas.width, h: canvas.height }, null, { kind: 'video', mime: type, duration: seconds });
+    toast((recNote ? recNote + ' ' : '') + 'Saved ' + rec.name + ' · ' + formatDuration(seconds));
+  } catch (err) {
+    toast('Could not save the clip: ' + (err && err.message ? err.message : 'unknown error'));
+  }
+}
+
+function updateTimecode() {
+  const t = (performance.now() - recStart) / 1000;
+  const parts = [Math.floor(t / 3600), Math.floor(t / 60) % 60, Math.floor(t) % 60, Math.floor((t % 1) * 30)];
+  $('recTime').textContent = parts.map((v) => String(v).padStart(2, '0')).join(':');
+  if (t >= REC_MAX_SECONDS) stopRecording('Clips stop at 3 minutes.');
+}
+
+const formatDuration = (s) => Math.floor(s / 60) + ':' + String(Math.floor(s % 60)).padStart(2, '0');
+
+function setRecordingUi(on) {
+  $('app').dataset.rec = String(on);
+  $('recTc').hidden = !on;
+  $('tallyText').textContent = on ? 'REC' : state.mode === 'live' ? 'LIVE' : $('tallyText').textContent;
+  for (const id of ['hudFrame', 'hudFc', 'flipBtn', 'moreBtn', 'rollBtn']) $(id).disabled = on;
+  for (const b of $('modes').children) b.disabled = on;
+  syncCapture();
+  if (!on) layout();
+}
+
+function syncCapture() {
+  const app = $('app'), canVideo = state.mode !== 'nocam';
+  app.dataset.capture = canVideo ? state.capture : 'photo';
+  for (const b of $('modes').children) {
+    b.setAttribute('aria-checked', String(b.dataset.capture === app.dataset.capture));
+    if (b.dataset.capture === 'video' && !recording) b.disabled = !canVideo;
+  }
+  if (state.mode === 'live') $('shutter').setAttribute('aria-label', app.dataset.capture === 'video' ? (recording ? 'Stop recording' : 'Start recording') : 'Take photo');
+}
+
+function setCapture(mode) {
+  state.capture = mode;
+  prefs.set('capture', mode);
+  syncCapture();
+  if (mode === 'video') ensureMic(); else releaseMic();
+  layout();
+}
+
+/* ---------- Camera ---------- */
+async function startCamera() {
+  stopCamera();
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    return setNoCam('This browser has no live camera access.');
+  }
+  setMode('boot');
+  const hd = state.res === 'hd';
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: { facingMode: { ideal: state.facing }, width: { ideal: hd ? 1920 : 3840 }, height: { ideal: hd ? 1080 : 2160 }, frameRate: { ideal: 30 } },
+    });
+  } catch (err) {
+    const why = err && err.name === 'NotAllowedError' ? 'Camera access is blocked for this page.'
+      : err && err.name === 'NotFoundError' ? 'No camera was found.' : 'The camera could not be started.';
+    return setNoCam(why, err && err.name === 'NotAllowedError');
+  }
+  video.srcObject = stream;
+  try { await video.play(); } catch {}
+  if (!video.videoWidth) await new Promise((res) => video.addEventListener('loadedmetadata', res, { once: true }));
+  canvas.dataset.src = '';
+  setMode('live');
+  startLoop();
+  ensureMic();
+}
+
+function stopCamera() {
+  stopRecording();
+  loopToken++;
+  if (stream) { stream.getTracks().forEach((t) => t.stop()); stream = null; }
+  releaseMic();
+  video.srcObject = null;
+}
+
+function setNoCam(reason, canRetry = true) {
+  stopCamera();
+  setMode('nocam');
+  showNotice('NO LIVE VIEW', 'Live view is off', reason + ' You can still shoot: the shutter opens the iPhone camera, and the look is applied when you come back.', canRetry);
+}
+
+function showNotice(tag, title, text, retry) {
+  $('notice').hidden = false;
+  $('noticeTag').textContent = tag;
+  $('noticeTitle').textContent = title;
+  $('noticeText').textContent = text;
+  $('noticeBtn').hidden = !retry;
+}
+
+function setMode(mode) {
+  state.mode = mode;
+  $('app').dataset.mode = mode;
+  $('tallyText').textContent = { boot: 'BOOT', live: 'LIVE', still: 'STILL', nocam: 'NO CAM' }[mode];
+  $('shutter').setAttribute('aria-label', mode === 'still' ? 'Save photo' : mode === 'nocam' ? 'Open the camera' : 'Take photo');
+  if (mode === 'live' || mode === 'still') $('notice').hidden = true;
+  if (mode === 'boot') showNotice('STARTING', 'Starting the camera', 'Allow camera access when your iPhone asks.', false);
+  $('srcInfo').textContent = '';
+  syncCapture();
+}
+
+/* ---------- Stills (imported, shot with the iPhone camera, or re-graded) ---------- */
+async function loadStill(file) {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = new Image();
+    img.src = url;
+    await img.decode();
+    let w = img.naturalWidth, h = img.naturalHeight;
+    const cap = Math.min(GL.maxTex, 4096);
+    if (Math.max(w, h) > cap) { const s = cap / Math.max(w, h); w = Math.round(w * s); h = Math.round(h * s); }
+    stillCanvas.width = w; stillCanvas.height = h;
+    stillCanvas.getContext('2d').drawImage(img, 0, 0, w, h);
+    return true;
+  } catch {
+    toast('That photo could not be opened.');
+    return false;
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+function enterStill() {
+  stopCamera();
+  setMode('still');
+  uploadSource(stillCanvas);
+  layout();
+}
+
+async function openStill(file) {
+  if (!file) return;
+  endRegrade();
+  if (await loadStill(file)) enterStill();
+}
+
+function leaveStill() {
+  endRegrade();
+  stillCanvas.width = stillCanvas.height = 0;
+  startCamera();
+}
+
+// Re-grading reopens a shot's ungraded frame with the settings it was shot with,
+// the way a RAW clip keeps ISO, white balance and look adjustable after the fact.
+let liveSettings = null;
+function gradeSettings() { return Object.fromEntries(GRADE_KEYS.map((k) => [k, state[k]])); }
+function applySettings(s, persist) {
+  for (const k of GRADE_KEYS) {
+    if (s[k] === undefined) continue;
+    state[k] = s[k];
+    if (persist) prefs.set(k, s[k]);
+  }
+  if (state.look === 'custom' && !customLut) state.look = 'cine';
+  syncHud(); syncLooks();
+}
+
+async function startRegrade(rec) {
+  const src = await shotSource(rec.id);
+  if (!src) { toast('This photo has no original frame to re-grade.'); return; }
+  if (!(await loadStill(src))) return;
+  closeViewer();
+  $('gallery').hidden = true;
+  if (!state.editing) liveSettings = gradeSettings();
+  state.editing = rec;
+  applySettings(rec.settings || {}, false);
+  enterStill();
+  $('tallyText').textContent = 'EDIT';
+  toast('Re-grading ' + rec.name);
+}
+
+function endRegrade() {
+  if (!state.editing) return;
+  state.editing = null;
+  applySettings(liveSettings, true);
+  liveSettings = null;
+}
+
+/* ---------- Roll storage ---------- */
+const idb = (() => {
+  let dbp = null;
+  const open = () => dbp || (dbp = new Promise((res, rej) => {
+    const rq = indexedDB.open('cine-mode', 2);
+    rq.onupgradeneeded = () => {
+      const db = rq.result;
+      for (const [name, opts] of [['shots', { keyPath: 'id' }], ['images'], ['sources'], ['luts']]) {
+        if (!db.objectStoreNames.contains(name)) db.createObjectStore(name, opts);
+      }
+    };
+    rq.onsuccess = () => res(rq.result);
+    rq.onerror = () => rej(rq.error);
+  }));
+  const run = async (store, mode, fn) => {
+    const db = await open();
+    return new Promise((res, rej) => {
+      const tx = db.transaction(store, mode), rq = fn(tx.objectStore(store));
+      tx.oncomplete = () => res(rq.result);
+      tx.onerror = tx.onabort = () => rej(tx.error);
+    });
+  };
+  return {
+    put: (store, value, key) => run(store, 'readwrite', (s) => s.put(value, key)),
+    get: (store, key) => run(store, 'readonly', (s) => s.get(key)),
+    all: (store) => run(store, 'readonly', (s) => s.getAll()),
+    del: (store, key) => run(store, 'readwrite', (s) => s.delete(key)),
+  };
+})();
+
+let shots = [];               // newest first: {id, name, w, h, look, settings, hasSource, created, thumbUrl}
+const memImages = new Map();  // used only if IndexedDB is unavailable
+const memSources = new Map();
+
+function nextClipName() {
+  const now = new Date(), day = now.toISOString().slice(0, 10).replace(/-/g, '');
+  let reel = prefs.get('reel', 1), clip = prefs.get('clip', 1);
+  const lastDay = prefs.get('day', day);
+  if (lastDay !== day) { reel++; clip = 1; } // a new shooting day starts a new reel
+  const name = `A${String(reel).padStart(3, '0')}_C${String(clip).padStart(4, '0')}_${day}`;
+  prefs.set('reel', reel); prefs.set('clip', clip + 1); prefs.set('day', day);
+  return name;
+}
+
+function updateClipHud() {
+  const day = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+  const clip = prefs.get('day', day) === day ? prefs.get('clip', 1) : 1;
+  $('clipVal').textContent = 'C' + String(clip).padStart(4, '0');
+}
+
+const lookLabel = () => (state.look === 'custom' && customLut ? customLut.title : (LOOKS.find((l) => l.id === state.look) || LOOKS[0]).name);
+
+async function storeShot({ blob, thumb, w, h }, source, extra = {}) {
+  const rec = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), name: nextClipName(), w, h, look: lookLabel(), settings: gradeSettings(), hasSource: !!source, created: Date.now(), ...extra };
+  try {
+    // Video clips are stored as Blobs: copying them into memory as one buffer is too costly.
+    await idb.put('images', rec.kind === 'video' ? blob : await blob.arrayBuffer(), rec.id);
+    if (source) await idb.put('sources', await source.arrayBuffer(), rec.id);
+    await idb.put('shots', { ...rec, thumb: await thumb.arrayBuffer() });
+  } catch {
+    memImages.set(rec.id, blob);
+    if (source) memSources.set(rec.id, source);
+  }
+  rec.thumbUrl = URL.createObjectURL(thumb);
+  shots.unshift(rec);
+  updateRoll();
+  updateClipHud();
+  return rec;
+}
+
+// Replace a shot's graded image after a re-grade. Its name and source frame stay the same.
+async function updateShot(rec, { blob, thumb, w, h }) {
+  Object.assign(rec, { w, h, look: lookLabel(), settings: gradeSettings(), edited: Date.now() });
+  const { thumbUrl, ...stored } = rec;
+  try {
+    await idb.put('images', await blob.arrayBuffer(), rec.id);
+    await idb.put('shots', { ...stored, thumb: await thumb.arrayBuffer() });
+  } catch {
+    memImages.set(rec.id, blob);
+  }
+  URL.revokeObjectURL(thumbUrl);
+  rec.thumbUrl = URL.createObjectURL(thumb);
+  updateRoll();
+  return rec;
+}
+
+async function loadShots() {
+  try {
+    const all = await idb.all('shots');
+    all.sort((a, b) => b.created - a.created);
+    shots = all.map(({ thumb, ...rec }) => ({ ...rec, thumbUrl: URL.createObjectURL(new Blob([thumb], { type: 'image/jpeg' })) }));
+  } catch { shots = []; }
+  updateRoll();
+}
+
+async function shotBlob(id, type = 'image/jpeg') {
+  if (memImages.has(id)) return memImages.get(id);
+  const data = await idb.get('images', id);
+  if (!data) return null;
+  return data instanceof Blob ? data : new Blob([data], { type });
+}
+
+async function shotSource(id) {
+  if (memSources.has(id)) return memSources.get(id);
+  try {
+    const buf = await idb.get('sources', id);
+    return buf ? new Blob([buf], { type: 'image/jpeg' }) : null;
+  } catch { return null; }
+}
+
+function updateRoll() {
+  $('rollThumb').src = shots[0] ? shots[0].thumbUrl : '';
+  $('rollCount').hidden = !shots.length;
+  $('rollCount').textContent = shots.length;
+}
+
+/* ---------- Saving to the device ---------- */
+let downloadsApi = null;
+if (window.claude && typeof window.claude.use === 'function') {
+  window.claude.use('downloads').then((d) => { downloadsApi = d; }).catch(() => {});
+}
+
+function canShareFiles(file) {
+  try { return !!(navigator.canShare && navigator.canShare({ files: [file] })); } catch { return false; }
+}
+
+async function saveToDevice(file) {
+  // Inside a Claude artifact the page's own save prompt is the only route out.
+  if (downloadsApi) {
+    try { await downloadsApi.save({ filename: file.name, data: file }); } catch (e) { if (e && e.code !== 'declined') toast('Saving is not available here. Press and hold the photo instead.'); }
+    return;
+  }
+  if (canShareFiles(file)) {
+    try { await navigator.share({ files: [file] }); } catch (e) { if (e && e.name !== 'AbortError') toast('Sharing failed. Press and hold the photo to save it.'); }
+    return;
+  }
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(file); a.download = file.name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+}
+
+/* ---------- UI ---------- */
+let toastTimer = 0;
+function toast(msg) {
+  const t = $('toast');
+  t.textContent = msg; t.classList.remove('hide');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.add('hide'), 2200);
+}
+
+function flash() {
+  const f = $('flash');
+  f.classList.remove('on'); void f.offsetWidth; f.classList.add('on');
+}
+
+function buildLooks() {
+  const nav = $('looks');
+  nav.textContent = '';
+  const chip = (id, label, colors, cls) => {
+    const b = document.createElement('button');
+    b.className = 'chip' + (cls ? ' ' + cls : '');
+    b.dataset.look = id;
+    if (id !== 'import') b.setAttribute('role', 'radio');
+    const sw = document.createElement('span');
+    sw.className = 'sw' + (id === 'custom' ? ' lut' : '');
+    for (const c of colors) { const i = document.createElement('i'); i.style.background = c; sw.appendChild(i); }
+    const t = document.createElement('span');
+    t.textContent = label;
+    if (colors.length) b.appendChild(sw);
+    b.appendChild(t);
+    nav.appendChild(b);
+  };
+  for (const look of LOOKS) chip(look.id, look.name, lookSwatches(look));
+  if (customLut) chip('custom', customLut.title || 'My LUT', ['#c9c6bd', '#77746c', '#2b2a27']);
+  chip('import', customLut ? 'Replace LUT' : '+ LUT', [], 'add');
+  syncLooks();
+}
+
+function syncLooks() {
+  for (const b of $('looks').querySelectorAll('[role="radio"]')) b.setAttribute('aria-checked', String(b.dataset.look === state.look));
+}
+
+function setLook(id) {
+  state.look = id;
+  prefs.set('look', id);
+  syncLooks();
+  requestRender();
+}
+
+function syncHud() {
+  $('isoVal').textContent = state.iso;
+  $('wbVal').textContent = state.kelvin + 'K';
+  $('frameVal').textContent = state.frame;
+  $('hudFc').setAttribute('aria-pressed', String(state.falseColor));
+}
+
+/* ISO / WB adjust panel */
+let adjusting = null;
+const ADJ = {
+  iso: {
+    label: 'ISO', values: ISOS, key: 'iso', base: 800, hud: 'hudIso',
+    note: 'Brightness. Each doubling is one stop brighter.',
+    sub: (v) => { const ev = Math.log2(v / 800); return (ev >= 0 ? '+' : '−') + Math.abs(ev).toFixed(1) + ' EV'; },
+    track: 'linear-gradient(90deg, #26262a, #d9d6cc)', scale: [200, 800, 3200],
+  },
+  wb: {
+    label: 'White balance', values: KELVINS, key: 'kelvin', base: 5600, hud: 'hudWb',
+    note: 'Relative to the light in the scene. Lower is cooler, higher is warmer.',
+    sub: (v) => (v === 5600 ? 'as shot' : v < 5600 ? 'cooler' : 'warmer'),
+    track: 'linear-gradient(90deg, #4f86d9, #d7d4cc 58%, #e2a24c)', scale: ['2800K', '5600K', '8000K'],
+  },
+};
+
+function openAdjust(which) {
+  if (adjusting === which) return closeAdjust();
+  adjusting = which;
+  const a = ADJ[which];
+  $('hudIso').setAttribute('aria-expanded', String(which === 'iso'));
+  $('hudWb').setAttribute('aria-expanded', String(which === 'wb'));
+  $('adjLabel').textContent = a.label;
+  $('adjNote').textContent = a.note;
+  const r = $('adjRange');
+  r.max = a.values.length - 1;
+  r.value = Math.max(0, a.values.indexOf(state[a.key]));
+  r.style.setProperty('--track', a.track);
+  $('adjScale').innerHTML = a.scale.map((s) => `<span>${s}</span>`).join('');
+  showAdjValue();
+  $('adjust').hidden = false;
+}
+
+function showAdjValue() {
+  const a = ADJ[adjusting], v = state[a.key];
+  $('adjValue').textContent = v + (adjusting === 'wb' ? 'K' : '');
+  $('adjSub').textContent = a.sub(v);
+}
+
+function closeAdjust() {
+  adjusting = null;
+  $('adjust').hidden = true;
+  $('hudIso').setAttribute('aria-expanded', 'false');
+  $('hudWb').setAttribute('aria-expanded', 'false');
+}
+
+$('adjRange').addEventListener('input', (e) => {
+  const a = ADJ[adjusting];
+  state[a.key] = a.values[+e.target.value];
+  prefs.set(a.key, state[a.key]);
+  showAdjValue(); syncHud(); requestRender();
+});
+$('adjReset').addEventListener('click', () => {
+  const a = ADJ[adjusting];
+  state[a.key] = a.base; prefs.set(a.key, a.base);
+  $('adjRange').value = a.values.indexOf(a.base);
+  showAdjValue(); syncHud(); requestRender();
+});
+$('hudIso').addEventListener('click', () => openAdjust('iso'));
+$('hudWb').addEventListener('click', () => openAdjust('wb'));
+$('hudFrame').addEventListener('click', () => {
+  const i = FRAMES.findIndex((f) => f.id === state.frame);
+  state.frame = FRAMES[(i + 1) % FRAMES.length].id;
+  prefs.set('frame', state.frame);
+  syncHud(); layout();
+  toast('Frame ' + (state.frame === 'FULL' ? 'full sensor' : state.frame));
+});
+$('hudFc').addEventListener('click', () => {
+  state.falseColor = !state.falseColor;
+  syncHud(); requestRender();
+  toast(state.falseColor ? 'False color on: green is mid grey, pink is skin, red is clipping' : 'False color off');
+});
+$('view').addEventListener('click', (e) => { if (adjusting && !e.target.closest('.adjust')) closeAdjust(); });
+
+$('looks').addEventListener('click', (e) => {
+  const b = e.target.closest('.chip');
+  if (!b) return;
+  if (b.dataset.look === 'import') return $('pickLut').click();
+  setLook(b.dataset.look);
+});
+
+/* Shutter */
+let busy = false;
+$('shutter').addEventListener('click', async () => {
+  if (busy) return;
+  if (state.mode === 'nocam') return $('pickCamera').click();
+  if (state.mode !== 'live' && state.mode !== 'still') return;
+  if (!geo) return;
+  if (state.mode === 'live' && state.capture === 'video') {
+    if (recording) stopRecording(); else startRecording();
+    return;
+  }
+  busy = true;
+  $('shutter').disabled = true;
+  try {
+    if (state.mode === 'live') { flash(); grabLiveFrame(); }
+    const shot = await renderPhoto();
+    if (state.editing) {
+      const rec = await updateShot(state.editing, shot);
+      toast('Re-graded ' + rec.name);
+    } else {
+      const rec = await storeShot(shot, await toJpeg(stillCanvas, 0.95));
+      toast('Saved ' + rec.name);
+    }
+    if (state.mode === 'still') leaveStill();
+    else stillCanvas.width = stillCanvas.height = 0;
+  } catch (err) {
+    toast('Could not save the photo: ' + (err && err.message ? err.message : 'unknown error'));
+  } finally {
+    busy = false;
+    $('shutter').disabled = false;
+  }
+});
+
+$('modes').addEventListener('click', (e) => {
+  const b = e.target.closest('button');
+  if (b && !b.disabled && b.dataset.capture !== state.capture) setCapture(b.dataset.capture);
+});
+
+$('flipBtn').addEventListener('click', () => {
+  state.facing = state.facing === 'user' ? 'environment' : 'user';
+  prefs.set('facing', state.facing);
+  startCamera();
+});
+$('discardBtn').addEventListener('click', leaveStill);
+$('noticeBtn').addEventListener('click', startCamera);
+$('pickCamera').addEventListener('change', (e) => { openStill(e.target.files[0]); e.target.value = ''; });
+$('pickPhoto').addEventListener('change', (e) => { openStill(e.target.files[0]); e.target.value = ''; });
+
+/* Sheets */
+function openSheet(id) { $('scrim').hidden = false; $(id).hidden = false; }
+function closeSheets() { $('scrim').hidden = true; $('moreSheet').hidden = true; $('lutSheet').hidden = true; }
+$('scrim').addEventListener('click', closeSheets);
+
+for (const [segId, items, key] of [['contrastSeg', CONTRASTS, 'contrast'], ['rolloffSeg', ROLLOFFS, 'rolloff']]) {
+  const seg = $(segId);
+  for (const it of items) {
+    const b = document.createElement('button');
+    b.setAttribute('role', 'radio');
+    b.dataset.v = it.id;
+    b.textContent = it.short || it.label;
+    b.setAttribute('aria-label', it.label);
+    seg.appendChild(b);
+  }
+  seg.addEventListener('click', (e) => {
+    const b = e.target.closest('button'); if (!b || b.dataset.v === state[key]) return;
+    state[key] = b.dataset.v; prefs.set(key, state[key]);
+    syncSettings(); buildLooks(); requestRender();
+  });
+}
+
+function syncSettings() {
+  for (const b of $('contrastSeg').children) b.setAttribute('aria-checked', String(b.dataset.v === state.contrast));
+  for (const b of $('rolloffSeg').children) b.setAttribute('aria-checked', String(b.dataset.v === state.rolloff));
+  for (const b of $('grainSeg').children) b.setAttribute('aria-checked', String(+b.dataset.v === state.grain));
+  for (const b of $('resSeg').children) b.setAttribute('aria-checked', String(b.dataset.v === state.res));
+  $('vigSwitch').setAttribute('aria-checked', String(state.vignette));
+  const standalone = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone;
+  $('installHint').hidden = !!standalone;
+  const size = sourceSize();
+  const saves = !geo ? '' : state.mode === 'live' && state.capture === 'video' ? ' · records ' + recordingSize().join(' × ') : ' · saves ' + geo.outW + ' × ' + geo.outH;
+  $('srcInfo').textContent = size ? (state.mode === 'live' ? 'Live view ' : 'Photo ') + size[0] + ' × ' + size[1] + saves : '';
+}
+$('moreBtn').addEventListener('click', () => { closeAdjust(); syncSettings(); openSheet('moreSheet'); });
+$('moreDone').addEventListener('click', closeSheets);
+$('grainSeg').addEventListener('click', (e) => {
+  const b = e.target.closest('button'); if (!b) return;
+  state.grain = +b.dataset.v; prefs.set('grain', state.grain); syncSettings(); requestRender();
+});
+$('resSeg').addEventListener('click', (e) => {
+  const b = e.target.closest('button'); if (!b || b.dataset.v === state.res) return;
+  state.res = b.dataset.v; prefs.set('res', state.res); syncSettings();
+  if (state.mode === 'live' || state.mode === 'boot') startCamera();
+});
+$('vigSwitch').addEventListener('click', () => {
+  state.vignette = !state.vignette; prefs.set('vignette', state.vignette); syncSettings(); requestRender();
+});
+$('importPhotoBtn').addEventListener('click', () => { closeSheets(); $('pickPhoto').click(); });
+$('importLutBtn').addEventListener('click', () => { closeSheets(); $('pickLut').click(); });
+
+/* LUT import */
+let pendingLut = null;
+$('pickLut').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  e.target.value = '';
+  if (!file) return;
+  pendingLut = null;
+  $('lutError').hidden = true;
+  $('lutChoice').hidden = false;
+  $('lutUse').hidden = false;
+  try {
+    const parsed = parseCube(await file.text());
+    parsed.title = (parsed.title || file.name.replace(/\.cube$/i, '')).slice(0, 40);
+    pendingLut = parsed;
+    $('lutInfo').textContent = `${parsed.title} · ${parsed.size}×${parsed.size}×${parsed.size}`;
+  } catch (err) {
+    $('lutInfo').textContent = file.name;
+    $('lutError').textContent = err.message + ' Choose a .cube file exported for video.';
+    $('lutError').hidden = false;
+    $('lutChoice').hidden = true;
+    $('lutUse').hidden = true;
+  }
+  openSheet('lutSheet');
+});
+$('lutCancel').addEventListener('click', () => { pendingLut = null; closeSheets(); });
+$('lutUse').addEventListener('click', async () => {
+  if (!pendingLut) return;
+  pendingLut.input = document.querySelector('input[name="lutIn"]:checked').value;
+  customLut = pendingLut;
+  pendingLut = null;
+  const old = lutCache.get('custom');
+  if (old) { gl.deleteTexture(old.tex); lutCache.delete('custom'); }
+  try { await idb.put('luts', { title: customLut.title, size: customLut.size, min: customLut.min, max: customLut.max, input: customLut.input, data: customLut.data.buffer }, 'custom'); } catch {}
+  closeSheets();
+  buildLooks();
+  setLook('custom');
+  toast('Using LUT ' + customLut.title);
+});
+
+async function loadCustomLut() {
+  try {
+    const rec = await idb.get('luts', 'custom');
+    if (rec) customLut = { ...rec, data: new Float32Array(rec.data) };
+  } catch {}
+}
+
+/* Roll */
+let viewing = null; // {rec, file, url}
+function renderGrid() {
+  const grid = $('galleryGrid');
+  grid.textContent = '';
+  $('galleryCount').textContent = shots.length === 1 ? '1 clip' : shots.length + ' clips';
+  if (!shots.length) {
+    const p = document.createElement('p');
+    p.className = 'g-empty';
+    p.textContent = 'Photos and videos you shoot appear here. They stay on this iPhone until you delete them.';
+    grid.appendChild(p);
+    return;
+  }
+  for (const rec of shots) {
+    const b = document.createElement('button');
+    b.setAttribute('aria-label', 'Open ' + rec.name + (rec.kind === 'video' ? ', video' : ''));
+    const img = document.createElement('img');
+    img.src = rec.thumbUrl; img.alt = '';
+    b.appendChild(img);
+    if (rec.kind === 'video') {
+      const d = document.createElement('span');
+      d.className = 'g-dur';
+      d.textContent = formatDuration(rec.duration);
+      b.appendChild(d);
+    }
+    b.addEventListener('click', () => openViewer(rec));
+    grid.appendChild(b);
+  }
+}
+$('rollBtn').addEventListener('click', () => { closeAdjust(); renderGrid(); $('gallery').hidden = false; });
+$('galleryClose').addEventListener('click', () => { $('gallery').hidden = true; });
+
+async function openViewer(rec) {
+  const isVideo = rec.kind === 'video', type = isVideo ? rec.mime || 'video/mp4' : 'image/jpeg';
+  const blob = await shotBlob(rec.id, type);
+  if (!blob) { toast('This clip is missing.'); return; }
+  closeViewer();
+  const ext = type === 'video/webm' ? '.webm' : isVideo ? '.mp4' : '.jpg';
+  const file = new File([blob], rec.name + ext, { type });
+  viewing = { rec, file, url: URL.createObjectURL(blob) };
+  $('viewerImg').hidden = isVideo;
+  $('viewerVideo').hidden = !isVideo;
+  if (isVideo) $('viewerVideo').src = viewing.url; else $('viewerImg').src = viewing.url;
+  $('viewerName').textContent = rec.name;
+  $('viewerDims').textContent = rec.w + ' × ' + rec.h + (isVideo ? ' · ' + formatDuration(rec.duration) : '');
+  $('viewerMeta').innerHTML = '';
+  const s = rec.settings || {};
+  const label = (list, id) => (list.find((x) => x.id === id) || {}).label || '';
+  for (const [k, v] of [['LOOK', rec.look], ['ISO', s.iso], ['WB', s.kelvin && s.kelvin + 'K'], ['CONTRAST', label(CONTRASTS, s.contrast)], ['ROLL-OFF', label(ROLLOFFS, s.rolloff)], ['', new Date(rec.edited || rec.created).toLocaleString()]]) {
+    if (!v) continue;
+    const span = document.createElement('span');
+    if (k) { const b = document.createElement('b'); b.textContent = k + ' '; span.appendChild(b); }
+    span.appendChild(document.createTextNode(v + '   '));
+    $('viewerMeta').appendChild(span);
+  }
+  const canSave = canShareFiles(file) || !!downloadsApi || !/iPhone|iPad|iPod/.test(navigator.userAgent);
+  $('viewerRegrade').hidden = !rec.hasSource;
+  $('viewerSave').hidden = !canSave;
+  $('viewerHint').textContent = isVideo ? 'Saving videos isn’t available in this browser.' : 'Press and hold the photo, then tap Save to Photos.';
+  $('viewerHint').hidden = canSave;
+  $('viewerActions').hidden = false;
+  $('viewerConfirm').hidden = true;
+  $('viewer').hidden = false;
+}
+function closeViewer() {
+  if (viewing) URL.revokeObjectURL(viewing.url);
+  viewing = null;
+  $('viewer').hidden = true;
+  $('viewerImg').removeAttribute('src');
+  $('viewerVideo').pause();
+  $('viewerVideo').removeAttribute('src');
+  $('viewerVideo').load();
+}
+$('viewerBack').addEventListener('click', closeViewer);
+$('viewerSave').addEventListener('click', () => { if (viewing) saveToDevice(viewing.file); });
+$('viewerRegrade').addEventListener('click', () => { if (viewing) startRegrade(viewing.rec); });
+$('viewerDelete').addEventListener('click', () => { $('viewerActions').hidden = true; $('viewerConfirm').hidden = false; });
+$('viewerKeep').addEventListener('click', () => { $('viewerActions').hidden = false; $('viewerConfirm').hidden = true; });
+$('viewerDeleteYes').addEventListener('click', async () => {
+  if (!viewing) return;
+  const { rec } = viewing;
+  try { await idb.del('images', rec.id); await idb.del('sources', rec.id); await idb.del('shots', rec.id); } catch {}
+  memImages.delete(rec.id);
+  memSources.delete(rec.id);
+  URL.revokeObjectURL(rec.thumbUrl);
+  shots = shots.filter((s) => s.id !== rec.id);
+  closeViewer(); updateRoll(); renderGrid();
+  if (state.editing === rec) leaveStill();
+});
+
+/* Lifecycle */
+let resizeTimer = 0;
+window.addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(layout, 120); });
+video.addEventListener('resize', () => { canvas.dataset.src = ''; });
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden && state.mode === 'live') { stopCamera(); setMode('boot'); }
+  else if (!document.hidden && state.mode === 'boot' && !stream) startCamera();
+});
+
+async function boot() {
+  syncHud();
+  updateClipHud();
+  let ok = false;
+  try { ok = initGL(); } catch (err) { console.error(err); }
+  if (!ok) {
+    setMode('nocam');
+    showNotice('NO GPU', 'Cine Mode can’t run here', 'It needs WebGL 2, which is in Safari on iOS 15 or later. Update your iPhone, then open this page again.', false);
+    $('shutter').disabled = true;
+    return;
+  }
+  await loadCustomLut();
+  if (state.look === 'custom' && !customLut) state.look = 'cine';
+  buildLooks();
+  loadShots();
+  startCamera();
+  if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
+}
+boot();
+</script>
+</body>
+</html>
