@@ -6,6 +6,7 @@ A camera web app for iPhone that shoots photos and video with the look of a RED 
 
 - **Live graded viewfinder.** The look is applied to the camera feed in real time on the GPU (WebGL 2).
 - **Photo and Video modes.** Video records the graded image (look, grain and vignette included) with sound, at up to 1920 pixels on the long side and 30 fps, as MP4 on iPhone. A REC timecode runs while recording; frame, camera flip and settings lock during a take. Clips stop at 3 minutes because recordings are held in memory until they finish.
+- **Auto-rotate.** The motion sensor detects whether you're holding the phone in portrait or landscape, even with Portrait Orientation Lock on, so photos and videos are saved the right way up, like the iPhone camera. Buttons turn to face you, and a video keeps the orientation it started with. iPhone asks once for Motion & Orientation access, on the first tap. It can be switched off in Settings.
 - **Looks:** Cine (the default cinema look), Golden, Teal & Amber, Bleach and Noir.
 - **Image pipeline controls** like a cinema camera's menu: Contrast (Low, Med-Low, Medium, Med-High, High) and Highlight roll-off (Hard, Medium, Soft, Very Soft).
 - **RAW-style re-grading.** Every shot keeps its ungraded frame, so you can reopen it from the roll and change ISO, white balance, look, contrast and roll-off afterwards, the way REDCODE RAW clips stay adjustable in post.

@@ -64,7 +64,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--rec); outli
 
 /* Viewfinder */
 .view { grid-area: view; position: relative; display: flex; align-items: center; justify-content: center; overflow: hidden; background: #000; }
-#screen { display: block; max-width: 100%; max-height: 100%; background: #000; }
+#screen { position: absolute; left: 50%; top: 50%; display: block; background: #000; transform: translate(-50%, -50%) rotate(var(--vf-rot, 0deg)); }
 [data-mode="boot"] #screen, [data-mode="nocam"] #screen { visibility: hidden; }
 .cam-feed { position: absolute; width: 2px; height: 2px; opacity: 0; pointer-events: none; }
 .flash { position: absolute; inset: 0; background: #fff; opacity: 0; pointer-events: none; }
@@ -155,6 +155,8 @@ input[type="range"]::-moz-range-thumb { width: 18px; height: 18px; border-radius
 .shutter:disabled { opacity: 0.4; }
 .side { grid-area: side; justify-self: end; display: flex; gap: 10px; }
 .hud button:disabled, .icon-btn:disabled, .roll:disabled, .modes button:disabled { opacity: 0.35; }
+/* Buttons turn to face the user when the phone is held sideways, like the iPhone camera. */
+.roll, .icon-btn svg, .shutter svg { transform: rotate(var(--ui-rot, 0deg)); transition: transform 0.3s ease; }
 [data-rec="true"] .tally i { animation: blink 1s steps(2, jump-none) infinite; }
 @keyframes blink { 50% { opacity: 0.15; } }
 .rec-tc {
@@ -191,6 +193,7 @@ input[type="range"]::-moz-range-thumb { width: 18px; height: 18px; border-radius
 .sheet-sub { margin: -8px 0 0; color: var(--dim); font: 12px var(--mono); overflow-wrap: anywhere; }
 .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 40px; }
 .row > span { color: var(--text); }
+.row > span small { display: block; margin-top: 2px; }
 .seg { display: flex; background: var(--ink); border: 1px solid var(--line); border-radius: 9px; padding: 2px; }
 .seg button { padding: 6px 10px; border-radius: 7px; font-size: 13px; color: var(--dim); }
 .seg button[aria-checked="true"] { background: var(--raise); color: var(--text); }
@@ -241,6 +244,7 @@ legend { padding: 0; margin-bottom: 8px; font-weight: 600; }
   .flash.on { animation: none; }
   .shutter span, .switch, .switch::after, .toast { transition: none; }
   [data-rec="true"] .tally i { animation: none; }
+  .roll, .icon-btn svg, .shutter svg { transition: none; }
 }
 </style>
 </head>
@@ -327,6 +331,7 @@ legend { padding: 0; margin-bottom: 8px; font-weight: 600; }
       <button role="radio" data-v="0">Off</button><button role="radio" data-v="0.45">Fine</button><button role="radio" data-v="0.75">Medium</button><button role="radio" data-v="1.1">Heavy</button>
     </div>
   </div>
+  <div class="row"><span id="rotLabel">Auto-rotate<small class="fine" id="rotNote">Saves landscape or portrait from how you hold the phone.</small></span><button class="switch" id="rotSwitch" role="switch" aria-labelledby="rotLabel" aria-checked="true"></button></div>
   <div class="row"><span id="vigLabel">Lens vignette</span><button class="switch" id="vigSwitch" role="switch" aria-labelledby="vigLabel" aria-checked="true"></button></div>
   <div class="row"><span>Live view resolution</span>
     <div class="seg" id="resSeg" role="radiogroup" aria-label="Live view resolution">
@@ -423,6 +428,8 @@ const state = {
   contrast: prefs.get('contrast', 'medium'),
   rolloff: prefs.get('rolloff', 'soft'),
   capture: prefs.get('capture', 'photo'), // photo | video
+  autoRotate: prefs.get('autoRotate', true),
+  videoTurn: 0,            // clockwise degrees the video is turned to come out upright
   falseColor: false,
   editing: null,           // shot being re-graded from its source frame
 };
@@ -595,14 +602,20 @@ const gl = canvas.getContext('webgl2', { alpha: false, antialias: false, premult
 const VS = `#version 300 es
 in vec2 aPos;
 uniform vec4 uCrop;
-uniform vec2 uFlip;
+uniform vec2 uFlip;   // x: mirror the frame, y: flip rows for readPixels
+uniform int uTurn;    // quarter turns clockwise applied to the frame
 out vec2 vSrc;
 out vec2 vFrame;
 void main() {
   vec2 t = aPos * 0.5 + 0.5;
-  vFrame = vec2(t.x, 1.0 - t.y);
-  vec2 f = vec2(mix(t.x, 1.0 - t.x, uFlip.x), mix(1.0 - t.y, t.y, uFlip.y));
-  vSrc = uCrop.xy + f * uCrop.zw;
+  vec2 o = vec2(t.x, uFlip.y > 0.5 ? t.y : 1.0 - t.y); // output position, rows top-down
+  vFrame = o;
+  vec2 s = o;
+  if (uTurn == 1) s = vec2(o.y, 1.0 - o.x);
+  else if (uTurn == 2) s = vec2(1.0 - o.x, 1.0 - o.y);
+  else if (uTurn == 3) s = vec2(1.0 - o.y, o.x);
+  if (uFlip.x > 0.5) s.x = 1.0 - s.x;
+  vSrc = uCrop.xy + s * uCrop.zw;
   gl_Position = vec4(aPos, 0.0, 1.0);
 }`;
 
@@ -714,7 +727,7 @@ function initGL() {
   if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
   GL.prog = prog;
   GL.u = {};
-  for (const name of ['uCrop', 'uFlip', 'uImage', 'uLut', 'uLutSize', 'uLutMin', 'uLutMax', 'uInput', 'uExpandA', 'uExposure', 'uWB', 'uGrain', 'uSeed', 'uAspect', 'uVignette', 'uFalseColor']) {
+  for (const name of ['uCrop', 'uFlip', 'uTurn', 'uImage', 'uLut', 'uLutSize', 'uLutMin', 'uLutMax', 'uInput', 'uExpandA', 'uExposure', 'uWB', 'uGrain', 'uSeed', 'uAspect', 'uVignette', 'uFalseColor']) {
     GL.u[name] = gl.getUniformLocation(prog, name);
   }
   GL.vao = gl.createVertexArray();
@@ -776,16 +789,18 @@ function sourceSize() {
   return null;
 }
 
-function computeGeometry() {
-  const size = sourceSize();
-  if (!size) { geo = null; return; }
-  const [sw, sh] = size;
+function geometryFor(sw, sh) {
   const frame = FRAMES.find((f) => f.id === state.frame) || FRAMES[0];
   let target = frame.ratio ? (sw >= sh ? frame.ratio : 1 / frame.ratio) : sw / sh;
   let cw = sw, ch = sh;
   if (sw / sh > target) cw = sh * target; else ch = sw / target;
   cw = Math.round(cw); ch = Math.round(ch);
-  geo = { crop: [(sw - cw) / 2 / sw, (sh - ch) / 2 / sh, cw / sw, ch / sh], outW: cw, outH: ch, aspect: cw / ch };
+  return { crop: [(sw - cw) / 2 / sw, (sh - ch) / 2 / sh, cw / sw, ch / sh], outW: cw, outH: ch, aspect: cw / ch };
+}
+
+function computeGeometry() {
+  const size = sourceSize();
+  geo = size ? geometryFor(size[0], size[1]) : null;
 }
 
 function layout() {
@@ -794,11 +809,17 @@ function layout() {
   const view = $('view'), vw = view.clientWidth, vh = view.clientHeight;
   let w = vw, h = vw / geo.aspect;
   if (h > vh) { h = vh; w = vh * geo.aspect; }
-  canvas.style.width = Math.floor(w) + 'px';
-  canvas.style.height = Math.floor(h) + 'px';
+  // Video records straight from this canvas, so it renders upright for how the phone
+  // is held and the canvas is turned back on screen. The turn is fixed for a whole take.
+  const videoMode = state.capture === 'video' && state.mode === 'live';
+  if (videoMode && !recording) state.videoTurn = captureTurn();
+  const turn = videoMode ? state.videoTurn : 0, sideways = turn % 180 !== 0;
+  canvas.style.width = Math.floor(sideways ? h : w) + 'px';
+  canvas.style.height = Math.floor(sideways ? w : h) + 'px';
+  canvas.style.setProperty('--vf-rot', -turn + 'deg');
   let pw, ph;
-  if (state.capture === 'video' && state.mode === 'live') {
-    [pw, ph] = recordingSize(); // video records straight from this canvas
+  if (videoMode) {
+    [pw, ph] = recordingSize();
   } else {
     const dpr = Math.min(window.devicePixelRatio || 1, 3);
     pw = Math.max(1, Math.min(Math.round(w * dpr), geo.outW));
@@ -816,13 +837,14 @@ function uploadSource(el) {
   gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, el);
 }
 
-function draw(w, h, { capture = false, mirror = false, seed = Math.random() * 500 } = {}) {
+function draw(w, h, { capture = false, mirror = false, turn = 0, geom = geo, seed = Math.random() * 500 } = {}) {
   const lut = activeLut(), u = GL.u;
   gl.viewport(0, 0, w, h);
   gl.useProgram(GL.prog);
   gl.bindVertexArray(GL.vao);
-  gl.uniform4fv(u.uCrop, geo.crop);
+  gl.uniform4fv(u.uCrop, geom.crop);
   gl.uniform2f(u.uFlip, mirror ? 1 : 0, capture ? 1 : 0);
+  gl.uniform1i(u.uTurn, turn / 90);
   gl.uniform1i(u.uImage, 0);
   gl.uniform1i(u.uLut, 1);
   gl.uniform1f(u.uLutSize, lut.size);
@@ -834,7 +856,7 @@ function draw(w, h, { capture = false, mirror = false, seed = Math.random() * 50
   gl.uniform3fv(u.uWB, wbGains(state.kelvin));
   gl.uniform1f(u.uGrain, state.grain);
   gl.uniform1f(u.uSeed, seed);
-  gl.uniform1f(u.uAspect, geo.aspect);
+  gl.uniform1f(u.uAspect, turn % 180 ? 1 / geom.aspect : geom.aspect);
   gl.uniform1f(u.uVignette, state.vignette ? 1 : 0);
   gl.uniform1f(u.uFalseColor, !capture && state.falseColor ? 1 : 0);
   gl.activeTexture(gl.TEXTURE1);
@@ -866,10 +888,11 @@ function startLoop() {
         if (recording && canvas.dataset.src) stopRecording('The phone rotated, so the clip ended.');
         canvas.dataset.src = src;
         layout();
+        orientationChanged();
       }
       uploadSource(video);
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-      draw(canvas.width, canvas.height, { mirror: state.facing === 'user' });
+      draw(canvas.width, canvas.height, { mirror: state.facing === 'user', turn: state.capture === 'video' ? state.videoTurn : 0 });
       if (wantRecThumb) { wantRecThumb = false; recThumb = snapshotThumb(); }
     }
     next();
@@ -877,13 +900,18 @@ function startLoop() {
   next();
 }
 
-// Copy the current camera frame into stillCanvas. It becomes the shot's ungraded source.
+// Copy the current camera frame into stillCanvas, mirrored for selfies and turned upright
+// for how the phone is held. It becomes the shot's ungraded source.
 function grabLiveFrame() {
-  const w = video.videoWidth, h = video.videoHeight;
-  stillCanvas.width = w; stillCanvas.height = h;
+  const w = video.videoWidth, h = video.videoHeight, turn = captureTurn();
+  const sideways = turn % 180 !== 0;
+  stillCanvas.width = sideways ? h : w;
+  stillCanvas.height = sideways ? w : h;
   const ctx = stillCanvas.getContext('2d');
-  if (state.facing === 'user') { ctx.translate(w, 0); ctx.scale(-1, 1); }
-  ctx.drawImage(video, 0, 0, w, h);
+  ctx.translate(stillCanvas.width / 2, stillCanvas.height / 2);
+  ctx.rotate((turn * Math.PI) / 180);
+  if (state.facing === 'user') ctx.scale(-1, 1);
+  ctx.drawImage(video, -w / 2, -h / 2, w, h);
   ctx.setTransform(1, 0, 0, 1, 0, 0);
 }
 
@@ -891,7 +919,8 @@ const toJpeg = (c, quality) => new Promise((res, rej) => c.toBlob((b) => (b ? re
 
 // Grade stillCanvas at full resolution off screen and encode it as a JPEG.
 async function renderPhoto() {
-  let w = geo.outW, h = geo.outH;
+  const g = geometryFor(stillCanvas.width, stillCanvas.height);
+  let w = g.outW, h = g.outH;
   const cap = Math.min(GL.maxTex, 4096);
   if (Math.max(w, h) > cap) { const s = cap / Math.max(w, h); w = Math.round(w * s); h = Math.round(h * s); }
   const tex = gl.createTexture();
@@ -901,7 +930,7 @@ async function renderPhoto() {
   gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
   gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
   uploadSource(stillCanvas);
-  draw(w, h, { capture: true });
+  draw(w, h, { capture: true, geom: g });
   const px = new Uint8ClampedArray(w * h * 4);
   gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, px);
   gl.bindFramebuffer(gl.FRAMEBUFFER, null);
@@ -926,13 +955,14 @@ async function renderPhoto() {
 const REC_LONG_SIDE = 1920;
 const REC_MAX_SECONDS = 180; // recordings are held in memory until they stop
 let recording = false, recorder = null, recChunks = [], recStart = 0, recTimer = 0;
-let recThumb = null, wantRecThumb = false, recNote = '';
+let recThumb = null, wantRecThumb = false, recNote = '', recSize = [0, 0];
 let micStream = null;
 
 function recordingSize() {
   const s = Math.min(1, REC_LONG_SIDE / Math.max(geo.outW, geo.outH));
   const even = (v) => Math.max(2, Math.round((v * s) / 2) * 2); // video encoders need even sizes
-  return [even(geo.outW), even(geo.outH)];
+  const w = even(geo.outW), h = even(geo.outH);
+  return state.videoTurn % 180 ? [h, w] : [w, h];
 }
 
 function recorderType() {
@@ -983,6 +1013,7 @@ function startRecording() {
   recorder.start(1000);
   recording = true;
   recStart = performance.now();
+  recSize = [canvas.width, canvas.height]; // the view resizes as soon as a take ends
   recThumb = null; wantRecThumb = true; recNote = '';
   setRecordingUi(true);
   recTimer = setInterval(updateTimecode, 100);
@@ -1007,7 +1038,7 @@ async function finishRecording(out) {
   setRecordingUi(false);
   if (!blob.size) { toast('Nothing was recorded.'); return; }
   try {
-    const rec = await storeShot({ blob, thumb, w: canvas.width, h: canvas.height }, null, { kind: 'video', mime: type, duration: seconds });
+    const rec = await storeShot({ blob, thumb, w: recSize[0], h: recSize[1] }, null, { kind: 'video', mime: type, duration: seconds });
     toast((recNote ? recNote + ' ' : '') + 'Saved ' + rec.name + ' · ' + formatDuration(seconds));
   } catch (err) {
     toast('Could not save the clip: ' + (err && err.message ? err.message : 'unknown error'));
@@ -1049,6 +1080,72 @@ function setCapture(mode) {
   syncCapture();
   if (mode === 'video') ensureMic(); else releaseMic();
   layout();
+}
+
+/* ---------- Orientation ----------
+   The motion sensor tells how the phone is held, so shots come out landscape or portrait
+   even when the screen is locked to portrait, like the iPhone camera. */
+let devAngle = null;     // how far the phone is turned counterclockwise: 0, 90, 180 or 270
+let motion = 'off';      // off | waiting | on | denied | unavailable
+let lastOutput = null;
+
+const mod360 = (a) => ((a % 360) + 360) % 360;
+
+function screenAngle() {
+  if (screen.orientation && typeof screen.orientation.angle === 'number') return mod360(screen.orientation.angle);
+  return typeof window.orientation === 'number' ? mod360(window.orientation) : 0;
+}
+
+// Clockwise degrees a live frame must turn to come out upright.
+function captureTurn() {
+  if (devAngle === null || !video.videoWidth) return 0;
+  const frameSideways = video.videoWidth > video.videoHeight, phoneSideways = devAngle % 180 !== 0;
+  const t = mod360(screenAngle() - devAngle);
+  if (frameSideways === phoneSideways) return t === 180 ? 180 : 0; // frames already follow the phone
+  return t % 180 ? t : devAngle === 90 ? 270 : 90;
+}
+
+function handleOrientation(e) {
+  if (e.beta == null || e.gamma == null) return;
+  const b = (e.beta * Math.PI) / 180, g = (e.gamma * Math.PI) / 180;
+  const gx = Math.cos(b) * Math.sin(g), gy = -Math.sin(b); // gravity across the screen
+  if (Math.hypot(gx, gy) < 0.45) return;                   // lying flat: keep the last orientation
+  const theta = (Math.atan2(-gx, -gy) * 180) / Math.PI, nearest = Math.round(theta / 90) * 90;
+  if (Math.abs(theta - nearest) > 35) return;              // between orientations: wait until it settles
+  if (mod360(nearest) !== devAngle) { devAngle = mod360(nearest); orientationChanged(); }
+}
+
+async function enableMotion(fromGesture) {
+  if (!state.autoRotate || motion === 'on') return;
+  if (!('DeviceOrientationEvent' in window)) { motion = 'unavailable'; return; }
+  if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+    // iPhone only asks for motion access from a tap.
+    if (!fromGesture) { motion = 'waiting'; return; }
+    try {
+      if ((await DeviceOrientationEvent.requestPermission()) !== 'granted') { motion = 'denied'; syncSettings(); return; }
+    } catch { motion = 'denied'; syncSettings(); return; }
+    if (!state.autoRotate || motion === 'on') return; // switched off, or enabled by another tap meanwhile
+  }
+  window.addEventListener('deviceorientation', handleOrientation);
+  motion = 'on';
+  syncSettings();
+}
+
+function disableMotion() {
+  window.removeEventListener('deviceorientation', handleOrientation);
+  motion = 'off';
+  devAngle = null;
+  orientationChanged();
+}
+
+function orientationChanged() {
+  const ui = devAngle === null ? 0 : mod360(devAngle - screenAngle());
+  $('app').style.setProperty('--ui-rot', (ui > 180 ? ui - 360 : ui) + 'deg');
+  if (state.mode !== 'live' || recording || !video.videoWidth) return;
+  if (state.capture === 'video') layout();
+  const out = (video.videoWidth > video.videoHeight) !== (captureTurn() % 180 !== 0) ? 'Landscape' : 'Portrait';
+  if (lastOutput && out !== lastOutput) toast(out);
+  lastOutput = out;
 }
 
 /* ---------- Camera ---------- */
@@ -1542,6 +1639,11 @@ function syncSettings() {
   for (const b of $('grainSeg').children) b.setAttribute('aria-checked', String(+b.dataset.v === state.grain));
   for (const b of $('resSeg').children) b.setAttribute('aria-checked', String(b.dataset.v === state.res));
   $('vigSwitch').setAttribute('aria-checked', String(state.vignette));
+  $('rotSwitch').setAttribute('aria-checked', String(state.autoRotate));
+  $('rotNote').textContent = !state.autoRotate ? 'Off: shots follow the screen.'
+    : motion === 'denied' ? 'Motion access is off. Allow it in Settings → Safari → Motion & Orientation Access, then reopen the app.'
+    : motion === 'unavailable' ? 'This device has no motion sensor.'
+    : 'Saves landscape or portrait from how you hold the phone.';
   const standalone = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone;
   $('installHint').hidden = !!standalone;
   const size = sourceSize();
@@ -1558,6 +1660,12 @@ $('resSeg').addEventListener('click', (e) => {
   const b = e.target.closest('button'); if (!b || b.dataset.v === state.res) return;
   state.res = b.dataset.v; prefs.set('res', state.res); syncSettings();
   if (state.mode === 'live' || state.mode === 'boot') startCamera();
+});
+$('rotSwitch').addEventListener('click', () => {
+  state.autoRotate = !state.autoRotate;
+  prefs.set('autoRotate', state.autoRotate);
+  if (state.autoRotate) enableMotion(true); else disableMotion();
+  syncSettings();
 });
 $('vigSwitch').addEventListener('click', () => {
   state.vignette = !state.vignette; prefs.set('vignette', state.vignette); syncSettings(); requestRender();
@@ -1703,7 +1811,9 @@ $('viewerDeleteYes').addEventListener('click', async () => {
 
 /* Lifecycle */
 let resizeTimer = 0;
-window.addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(layout, 120); });
+window.addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => { layout(); orientationChanged(); }, 120); });
+// The first tap anywhere asks for motion access (iPhone allows the prompt only from a tap).
+document.addEventListener('click', () => { if (motion === 'waiting') enableMotion(true); }, { capture: true });
 video.addEventListener('resize', () => { canvas.dataset.src = ''; });
 document.addEventListener('visibilitychange', () => {
   if (document.hidden && state.mode === 'live') { stopCamera(); setMode('boot'); }
@@ -1725,6 +1835,7 @@ async function boot() {
   if (state.look === 'custom' && !customLut) state.look = 'cine';
   buildLooks();
   loadShots();
+  enableMotion(false);
   startCamera();
   if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
 }
