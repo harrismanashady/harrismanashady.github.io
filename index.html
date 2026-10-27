@@ -24,6 +24,7 @@
   --dim: #8f8d96;
   --rec: #ee2b2f;
   --rec-soft: rgba(238, 43, 47, 0.16);
+  --af: #ffd84a;
   --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
   --sans: -apple-system, BlinkMacSystemFont, system-ui, "Helvetica Neue", Arial, sans-serif;
   color-scheme: dark;
@@ -71,7 +72,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--rec); outli
 .flash.on { animation: flash 0.32s ease-out; }
 @keyframes flash { from { opacity: 0.85; } to { opacity: 0; } }
 .toast {
-  position: absolute; top: 12px; left: 50%; transform: translateX(-50%); max-width: calc(100% - 32px);
+  position: absolute; top: 52px; left: 50%; transform: translateX(-50%); max-width: calc(100% - 32px);
   background: rgba(16, 16, 18, 0.92); border: 1px solid var(--line); border-radius: 999px;
   padding: 6px 14px; font: 500 12px/1.3 var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   transition: opacity 0.25s; pointer-events: none;
@@ -165,6 +166,28 @@ input[type="range"]::-moz-range-thumb { width: 18px; height: 18px; border-radius
   font: 500 13px var(--mono); font-variant-numeric: tabular-nums; pointer-events: none;
 }
 .rec-tc i { width: 8px; height: 8px; border-radius: 50%; background: var(--rec); }
+
+/* Focus, lenses */
+.reticle { position: absolute; width: 76px; height: 76px; margin: -38px 0 0 -38px; border: 1.5px solid var(--af); pointer-events: none; animation: reticle-in 0.25s ease-out; }
+.reticle::before, .reticle::after { content: ""; position: absolute; background: var(--af); }
+.reticle::before { left: 50%; top: -1px; width: 1.5px; height: 8px; box-shadow: 0 75px 0 var(--af); }
+.reticle::after { top: 50%; left: -1px; height: 1.5px; width: 8px; box-shadow: 75px 0 0 var(--af); }
+.reticle span { position: absolute; top: 100%; left: 50%; transform: translateX(-50%) rotate(var(--ui-rot, 0deg)); margin-top: 13px; font: 600 10px var(--mono); color: var(--af); letter-spacing: 0.08em; white-space: nowrap; }
+.reticle.hunting { animation: reticle-in 0.25s ease-out, reticle-pulse 0.45s ease-in-out 0.25s infinite alternate; }
+.reticle.locked { opacity: 0.6; }
+@keyframes reticle-in { from { transform: scale(1.4); opacity: 0; } }
+@keyframes reticle-pulse { to { transform: scale(0.88); } }
+.lock-badge {
+  position: absolute; top: 12px; right: max(12px, env(safe-area-inset-right, 0px)); display: flex; align-items: center; gap: 8px;
+  background: rgba(0, 0, 0, 0.62); border: 1px solid var(--af); color: var(--af); border-radius: 6px; padding: 5px 10px;
+  font: 600 11px var(--mono); letter-spacing: 0.06em;
+}
+.lenses { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); display: flex; align-items: center; gap: 6px; padding: 4px; border-radius: 999px; background: rgba(0, 0, 0, 0.45); }
+.view:has(.adjust:not([hidden])) .lenses { visibility: hidden; }
+.lenses button { width: 36px; height: 36px; border-radius: 50%; background: rgba(24, 24, 27, 0.85); font: 600 12px var(--sans); font-variant-numeric: tabular-nums; }
+.lenses button span { display: inline-block; transform: rotate(var(--ui-rot, 0deg)); transition: transform 0.3s ease; }
+.lenses button[aria-checked="true"] { width: 42px; height: 42px; margin: -3px 0; color: var(--af); font-size: 13px; }
+.lenses button:disabled { opacity: 0.4; }
 .rec-tc b { color: var(--rec); font-weight: 700; letter-spacing: 0.08em; }
 .icon-btn { width: 44px; height: 44px; border-radius: 50%; background: var(--panel); border: 1px solid var(--line); display: grid; place-items: center; }
 .icon-btn svg { width: 22px; height: 22px; }
@@ -251,12 +274,12 @@ legend { padding: 0; margin-bottom: 8px; font-weight: 600; }
 <body>
 <div class="app" id="app" data-mode="boot" data-capture="photo" data-rec="false">
   <header class="hud">
-    <div class="tally"><small>Camera</small><b><i></i><span id="tallyText">BOOT</span></b></div>
+    <div class="tally"><small id="clipVal" aria-label="Next clip">C0001</small><b><i></i><span id="tallyText">BOOT</span></b></div>
     <button id="hudIso" aria-expanded="false" aria-controls="adjust"><small>ISO</small><b id="isoVal">800</b></button>
     <button id="hudWb" aria-expanded="false" aria-controls="adjust"><small>WB</small><b id="wbVal">5600K</b></button>
+    <button id="hudIris" aria-expanded="false" aria-controls="adjust"><small>Iris</small><b id="irisVal">f/1.78</b></button>
     <button id="hudFrame" aria-label="Frame aspect ratio"><small>Frame</small><b id="frameVal">17:9</b></button>
     <button id="hudFc" aria-pressed="false" aria-label="False color exposure view"><small>Expo</small><b>FC</b></button>
-    <div><small>Next</small><b id="clipVal">C0001</b></div>
   </header>
 
   <main class="view" id="view">
@@ -280,6 +303,9 @@ legend { padding: 0; margin-bottom: 8px; font-weight: 600; }
       <input type="range" id="adjRange" min="0" max="12" step="1" aria-labelledby="adjLabel">
       <div class="adj-scale" id="adjScale"></div>
     </div>
+    <div class="reticle" id="reticle" hidden><span id="reticleTag">AF</span></div>
+    <div class="lenses" id="lenses" role="radiogroup" aria-label="Lens" hidden></div>
+    <button class="lock-badge" id="lockBadge" hidden aria-label="Unlock focus and exposure"><span id="lockText">AF·AE LOCK</span><b aria-hidden="true">×</b></button>
     <div class="rec-tc" id="recTc" hidden><i></i><b>REC</b><span id="recTime">00:00:00:00</span></div>
     <div class="toast hide" id="toast" role="status" aria-live="polite"></div>
   </main>
@@ -412,8 +438,19 @@ const CONTRASTS = [
 const ROLLOFFS = [
   { id: 'hard', label: 'Hard', k: 0.5 }, { id: 'medium', label: 'Medium', k: 0.75 }, { id: 'soft', label: 'Soft', k: 1 }, { id: 'vsoft', label: 'Very Soft', k: 1.6 },
 ];
+// iPhone 14 Pro / Pro Max lenses: 35 mm equivalent focal length and their fixed apertures.
+// `blur` scales the simulated depth of field (longer lenses blur more).
+const LENSES = {
+  ultra: { label: '.5', mm: 13, fnum: 2.2, blur: 0.45 },
+  wide: { label: '1', mm: 24, fnum: 1.78, blur: 1 },
+  wide2: { label: '2', mm: 48, fnum: 1.78, blur: 1.35, crop: 2 }, // a 2x crop of the main lens, as on iPhone
+  tele: { label: '3', mm: 77, fnum: 2.8, blur: 1.7 },
+  front: { label: '', mm: 23, fnum: 1.9, blur: 0.9 },
+};
+// Simulated iris. 'lens' leaves the lens as it is; an f-stop adds depth-of-field blur.
+const IRIS = [1.4, 2, 2.8, 4, 5.6, 8, 'lens'];
 // Settings a shot remembers so it can be re-graded later, like a RAW clip.
-const GRADE_KEYS = ['look', 'iso', 'kelvin', 'frame', 'grain', 'vignette', 'contrast', 'rolloff'];
+const GRADE_KEYS = ['look', 'iso', 'kelvin', 'frame', 'grain', 'vignette', 'contrast', 'rolloff', 'iris', 'focusPt'];
 
 const state = {
   mode: 'boot',            // boot | live | still | nocam
@@ -430,6 +467,10 @@ const state = {
   capture: prefs.get('capture', 'photo'), // photo | video
   autoRotate: prefs.get('autoRotate', true),
   videoTurn: 0,            // clockwise degrees the video is turned to come out upright
+  lens: prefs.get('lens', 'wide'),
+  iris: prefs.get('iris', 'lens'),
+  focusPt: [0.5, 0.5],     // focus point in the source frame (0..1), also the center of the simulated depth of field
+  lock: null,              // {af, iso} while focus/exposure are locked by a tap
   falseColor: false,
   editing: null,           // shot being re-graded from its source frame
 };
@@ -638,6 +679,10 @@ uniform float uSeed;
 uniform float uAspect;
 uniform float uVignette;
 uniform float uFalseColor;
+uniform vec2 uFocusPt;     // focus point in the source frame
+uniform vec2 uTexSize;     // source size in pixels
+uniform float uCropShortPx;
+uniform float uBlurPx;     // simulated depth of field: blur radius far from focus, in source pixels
 out vec4 outColor;
 
 const mat3 M709to2020 = mat3(
@@ -666,12 +711,37 @@ float hash(vec2 p) {
   return fract((p3.x + p3.y) * p3.z);
 }
 
-void main() {
-  vec3 lin = srgbToLin(texture(uImage, vSrc).rgb);
+vec3 fetchLin(vec2 uv, float lod) {
+  vec3 lin = srgbToLin(textureLod(uImage, uv, lod).rgb);
   if (uExpandA > 0.0) {
     float m = max(max(lin.r, lin.g), lin.b);
     float me = m * (1.0 - uExpandA * 0.18) / (1.0 - uExpandA * min(m, 0.999));
     lin *= m > 1e-5 ? me / m : 1.0;
+  }
+  return lin;
+}
+
+void main() {
+  // Simulated depth of field: a disc blur that grows with distance from the focus point.
+  // It runs in linear light, after highlights are restored, so bright points bloom into bokeh.
+  float rad = 0.0;
+  if (uBlurPx > 0.5) {
+    float d = length((vSrc - uFocusPt) * uTexSize) / uCropShortPx;
+    rad = uBlurPx * smoothstep(0.14, 0.7, d);
+  }
+  vec3 lin;
+  if (rad > 0.75) {
+    vec3 acc = vec3(0.0);
+    float spin = hash(floor(vSrc * uTexSize)) * 6.2831853; // per-pixel rotation turns banding into fine noise
+    float lod = max(0.0, log2(rad * 0.35));                  // pre-shrunk samples match the spacing between taps
+    for (int i = 0; i < 32; i++) {
+      float fi = float(i) + 0.5;
+      float a = fi * 2.39996323 + spin;
+      acc += fetchLin(vSrc + vec2(cos(a), sin(a)) * (sqrt(fi / 32.0) * rad) / uTexSize, lod);
+    }
+    lin = acc / 32.0;
+  } else {
+    lin = fetchLin(vSrc, 0.0);
   }
   lin *= uWB * uExposure;
   vec3 enc;
@@ -727,7 +797,7 @@ function initGL() {
   if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
   GL.prog = prog;
   GL.u = {};
-  for (const name of ['uCrop', 'uFlip', 'uTurn', 'uImage', 'uLut', 'uLutSize', 'uLutMin', 'uLutMax', 'uInput', 'uExpandA', 'uExposure', 'uWB', 'uGrain', 'uSeed', 'uAspect', 'uVignette', 'uFalseColor']) {
+  for (const name of ['uCrop', 'uFlip', 'uTurn', 'uImage', 'uLut', 'uLutSize', 'uLutMin', 'uLutMax', 'uInput', 'uExpandA', 'uExposure', 'uWB', 'uGrain', 'uSeed', 'uAspect', 'uVignette', 'uFalseColor', 'uFocusPt', 'uTexSize', 'uCropShortPx', 'uBlurPx']) {
     GL.u[name] = gl.getUniformLocation(prog, name);
   }
   GL.vao = gl.createVertexArray();
@@ -789,23 +859,24 @@ function sourceSize() {
   return null;
 }
 
-function geometryFor(sw, sh) {
+function geometryFor(sw, sh, zoom = 1) {
   const frame = FRAMES.find((f) => f.id === state.frame) || FRAMES[0];
   let target = frame.ratio ? (sw >= sh ? frame.ratio : 1 / frame.ratio) : sw / sh;
   let cw = sw, ch = sh;
   if (sw / sh > target) cw = sh * target; else ch = sw / target;
-  cw = Math.round(cw); ch = Math.round(ch);
-  return { crop: [(sw - cw) / 2 / sw, (sh - ch) / 2 / sh, cw / sw, ch / sh], outW: cw, outH: ch, aspect: cw / ch };
+  cw = Math.round(cw / zoom); ch = Math.round(ch / zoom);
+  return { crop: [(sw - cw) / 2 / sw, (sh - ch) / 2 / sh, cw / sw, ch / sh], outW: cw, outH: ch, aspect: cw / ch, srcW: sw, srcH: sh };
 }
 
 function computeGeometry() {
   const size = sourceSize();
-  geo = size ? geometryFor(size[0], size[1]) : null;
+  geo = size ? geometryFor(size[0], size[1], state.mode === 'live' ? lensCrop() : 1) : null;
 }
 
 function layout() {
   if (!recording) computeGeometry(); // the frame is locked while a clip records
   if (!geo) return;
+  $('reticle').hidden = true; // its screen position no longer matches the picture
   const view = $('view'), vw = view.clientWidth, vh = view.clientHeight;
   let w = vw, h = vw / geo.aspect;
   if (h > vh) { h = vh; w = vh * geo.aspect; }
@@ -835,9 +906,20 @@ function uploadSource(el) {
   gl.bindTexture(gl.TEXTURE_2D, GL.frameTex);
   gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
   gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, el);
+  // The simulated iris samples smaller copies of the frame so a wide blur stays smooth.
+  const blur = state.iris !== 'lens';
+  if (blur) gl.generateMipmap(gl.TEXTURE_2D);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, blur ? gl.LINEAR_MIPMAP_LINEAR : gl.LINEAR);
 }
 
-function draw(w, h, { capture = false, mirror = false, turn = 0, geom = geo, seed = Math.random() * 500 } = {}) {
+// Blur radius in source pixels for the simulated iris, at full distance from focus.
+function irisBlurPx(geom) {
+  if (state.iris === 'lens') return 0;
+  const strength = Math.log2(16 / state.iris) / Math.log2(16 / 1.4); // f/1.4 -> 1, f/16 -> 0
+  return strength * 0.028 * Math.min(geom.crop[2] * geom.srcW, geom.crop[3] * geom.srcH) * lensSpec().blur;
+}
+
+function draw(w, h, { capture = false, mirror = false, turn = 0, geom = geo, focus = state.focusPt, seed = Math.random() * 500 } = {}) {
   const lut = activeLut(), u = GL.u;
   gl.viewport(0, 0, w, h);
   gl.useProgram(GL.prog);
@@ -859,6 +941,10 @@ function draw(w, h, { capture = false, mirror = false, turn = 0, geom = geo, see
   gl.uniform1f(u.uAspect, turn % 180 ? 1 / geom.aspect : geom.aspect);
   gl.uniform1f(u.uVignette, state.vignette ? 1 : 0);
   gl.uniform1f(u.uFalseColor, !capture && state.falseColor ? 1 : 0);
+  gl.uniform2fv(u.uFocusPt, focus);
+  gl.uniform2f(u.uTexSize, geom.srcW, geom.srcH);
+  gl.uniform1f(u.uCropShortPx, Math.min(geom.crop[2] * geom.srcW, geom.crop[3] * geom.srcH));
+  gl.uniform1f(u.uBlurPx, irisBlurPx(geom));
   gl.activeTexture(gl.TEXTURE1);
   gl.bindTexture(gl.TEXTURE_3D, lut.tex);
   gl.activeTexture(gl.TEXTURE0);
@@ -900,25 +986,37 @@ function startLoop() {
   next();
 }
 
-// Copy the current camera frame into stillCanvas, mirrored for selfies and turned upright
-// for how the phone is held. It becomes the shot's ungraded source.
+// Copy the current camera frame into stillCanvas: cropped for the 2x lens, mirrored for
+// selfies and turned upright for how the phone is held. It becomes the shot's ungraded source.
 function grabLiveFrame() {
-  const w = video.videoWidth, h = video.videoHeight, turn = captureTurn();
-  const sideways = turn % 180 !== 0;
+  const turn = captureTurn(), zoom = lensCrop(), vw = video.videoWidth, vh = video.videoHeight;
+  const w = Math.round(vw / zoom), h = Math.round(vh / zoom), sideways = turn % 180 !== 0;
   stillCanvas.width = sideways ? h : w;
   stillCanvas.height = sideways ? w : h;
   const ctx = stillCanvas.getContext('2d');
   ctx.translate(stillCanvas.width / 2, stillCanvas.height / 2);
   ctx.rotate((turn * Math.PI) / 180);
   if (state.facing === 'user') ctx.scale(-1, 1);
-  ctx.drawImage(video, -w / 2, -h / 2, w, h);
+  ctx.drawImage(video, (vw - w) / 2, (vh - h) / 2, w, h, -w / 2, -h / 2, w, h);
   ctx.setTransform(1, 0, 0, 1, 0, 0);
+  return { turn, zoom };
+}
+
+// Where a live-frame point lands in the frame grabLiveFrame produced.
+function liveToStill([u, v], { turn, zoom }) {
+  u = (u - 0.5) * zoom + 0.5;
+  v = (v - 0.5) * zoom + 0.5;
+  if (state.facing === 'user') u = 1 - u;
+  if (turn === 90) return [1 - v, u];
+  if (turn === 180) return [1 - u, 1 - v];
+  if (turn === 270) return [v, 1 - u];
+  return [u, v];
 }
 
 const toJpeg = (c, quality) => new Promise((res, rej) => c.toBlob((b) => (b ? res(b) : rej(new Error('Could not encode the photo.'))), 'image/jpeg', quality));
 
 // Grade stillCanvas at full resolution off screen and encode it as a JPEG.
-async function renderPhoto() {
+async function renderPhoto(focus) {
   const g = geometryFor(stillCanvas.width, stillCanvas.height);
   let w = g.outW, h = g.outH;
   const cap = Math.min(GL.maxTex, 4096);
@@ -930,7 +1028,7 @@ async function renderPhoto() {
   gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
   gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
   uploadSource(stillCanvas);
-  draw(w, h, { capture: true, geom: g });
+  draw(w, h, { capture: true, geom: g, focus });
   const px = new Uint8ClampedArray(w * h * 4);
   gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, px);
   gl.bindFramebuffer(gl.FRAMEBUFFER, null);
@@ -1061,6 +1159,7 @@ function setRecordingUi(on) {
   for (const id of ['hudFrame', 'hudFc', 'flipBtn', 'moreBtn', 'rollBtn']) $(id).disabled = on;
   for (const b of $('modes').children) b.disabled = on;
   syncCapture();
+  buildLenses();
   if (!on) layout();
 }
 
@@ -1148,20 +1247,230 @@ function orientationChanged() {
   lastOutput = out;
 }
 
+/* ---------- Lenses ----------
+   Since iOS 16.3 each back camera is listed separately. The labels are localized, so
+   unrecognized ones fall back to letting iOS choose. */
+let lensIds = prefs.get('lensIds', {}); // lens type -> deviceId
+let lensesDetected = false;
+let camConstraints = {};
+
+const lensAvailable = (key) => key === 'wide' || key === 'wide2' || !!lensIds[key];
+const currentLensKey = () => (state.facing === 'user' ? 'front' : lensAvailable(state.lens) ? state.lens : 'wide');
+const lensSpec = () => LENSES[currentLensKey()];
+const lensDevice = (key) => ((key === 'ultra' || key === 'tele') && lensIds[key] ? key : 'wide');
+const lensCrop = () => (state.mode === 'live' && currentLensKey() === 'wide2' ? LENSES.wide2.crop : 1);
+
+async function detectLenses() {
+  if (lensesDetected) return false;
+  let devices;
+  try { devices = await navigator.mediaDevices.enumerateDevices(); } catch { return false; }
+  const found = {};
+  for (const d of devices) {
+    if (d.kind !== 'videoinput' || !d.label) continue;
+    const label = d.label.toLowerCase();
+    let facing = '';
+    try { facing = ((d.getCapabilities && d.getCapabilities().facingMode) || [])[0] || ''; } catch {}
+    if (facing === 'user' || /front|frontal|vorder|avant|anterior/.test(label)) continue;
+    if (/dual|triple|doble|dreifach|double/.test(label)) continue; // virtual cameras that switch lenses by themselves
+    const type = /ultra/.test(label) ? 'ultra' : /tele/.test(label) ? 'tele' : 'wide';
+    if (!found[type]) found[type] = d.deviceId;
+  }
+  lensesDetected = true;
+  if (!found.wide) return false;
+  lensIds = found;
+  prefs.set('lensIds', found);
+  return true;
+}
+
+function buildLenses() {
+  const el = $('lenses'), current = currentLensKey();
+  const keys = state.mode === 'live' && state.facing === 'environment' ? ['ultra', 'wide', 'wide2', 'tele'].filter(lensAvailable) : [];
+  el.textContent = '';
+  el.hidden = keys.length < 2;
+  for (const key of keys) {
+    const b = document.createElement('button'), s = document.createElement('span');
+    b.setAttribute('role', 'radio');
+    b.setAttribute('aria-checked', String(key === current));
+    b.setAttribute('aria-label', LENSES[key].mm + ' mm lens');
+    b.dataset.lens = key;
+    b.disabled = recording;
+    s.textContent = LENSES[key].label + (key === current ? '×' : '');
+    b.appendChild(s);
+    el.appendChild(b);
+  }
+}
+
+$('lenses').addEventListener('click', (e) => {
+  const b = e.target.closest('button');
+  if (!b || b.disabled || recording || b.dataset.lens === currentLensKey()) return;
+  const before = lensDevice(state.lens);
+  state.lens = b.dataset.lens;
+  prefs.set('lens', state.lens);
+  resetFocus();
+  syncHud();
+  toast(`${lensSpec().mm} mm · f/${lensSpec().fnum}`);
+  if (lensDevice(state.lens) === before) { canvas.dataset.src = ''; buildLenses(); } // 1x and 2x share a lens
+  else startCamera({ quiet: true });
+});
+
+/* ---------- Focus and exposure ----------
+   iPhone Safari lets a page set the lens focus distance but not a focus point, so tap-to-focus
+   sweeps the focus distance and keeps the setting that is sharpest at the tapped spot, the way
+   contrast-detect autofocus works. The tap also spot-meters exposure. */
+const probe = document.createElement('canvas');
+probe.width = probe.height = 96;
+const probeCtx = probe.getContext('2d', { willReadFrequently: true });
+let afToken = 0, focusNoteShown = false;
+
+// Brightness (linear) and sharpness (variance of the Laplacian) around a point of a video or canvas.
+function regionStats(src, [u, v], size = 0.08) {
+  const sw = src.videoWidth || src.width, sh = src.videoHeight || src.height;
+  if (!sw || !sh) return null;
+  const side = Math.max(16, Math.round(Math.min(sw, sh) * size));
+  const sx = Math.min(Math.max(u * sw - side / 2, 0), sw - side), sy = Math.min(Math.max(v * sh - side / 2, 0), sh - side);
+  probeCtx.drawImage(src, sx, sy, side, side, 0, 0, 96, 96);
+  const d = probeCtx.getImageData(0, 0, 96, 96).data, g = new Float32Array(96 * 96);
+  let light = 0;
+  for (let i = 0; i < g.length; i++) {
+    const r = d[i * 4] / 255, gr = d[i * 4 + 1] / 255, b = d[i * 4 + 2] / 255;
+    g[i] = lum(r, gr, b);
+    light += lum(srgbToLin(r), srgbToLin(gr), srgbToLin(b));
+  }
+  let s = 0, s2 = 0, n = 0;
+  for (let y = 1; y < 95; y++) for (let x = 1; x < 95; x++) {
+    const i = y * 96 + x, l = 4 * g[i] - g[i - 1] - g[i + 1] - g[i - 96] - g[i + 96];
+    s += l; s2 += l * l; n++;
+  }
+  return { light: light / g.length, sharp: s2 / n - (s / n) ** 2 };
+}
+
+const nextFrame = () => new Promise((res) => (video.requestVideoFrameCallback ? video.requestVideoFrameCallback(() => res()) : requestAnimationFrame(() => res())));
+const nearestIso = (v) => ISOS.reduce((a, b) => (Math.abs(Math.log2(b / v)) < Math.abs(Math.log2(a / v)) ? b : a));
+
+async function contrastAF(uv, token) {
+  const track = stream && stream.getVideoTracks()[0];
+  let range = null;
+  try { range = track && track.getCapabilities && track.getCapabilities().focusDistance; } catch {}
+  if (!range || !(range.max > range.min)) return false;
+  const { width, height, frameRate } = camConstraints;
+  const setFocus = (d) => track.applyConstraints({ width, height, frameRate, advanced: [{ focusDistance: d }] });
+  const sharpnessAt = async (d) => {
+    await setFocus(d);
+    for (let i = 0; i < 3; i++) await nextFrame(); // let the lens settle
+    if (token !== afToken) throw new Error('superseded');
+    return regionStats(video, uv).sharp;
+  };
+  const { min, max } = range, steps = 6; // coarse pass, then two finer passes around the best
+  let step = (max - min) / steps, best = min, bestSharp = -1;
+  for (let i = 0; i <= steps; i++) {
+    const d = min + step * i, s = await sharpnessAt(d);
+    if (s > bestSharp) { bestSharp = s; best = d; }
+  }
+  for (let round = 0; round < 2; round++) { // narrow in around the sharpest setting
+    step /= 2;
+    const center = best;
+    for (const d of [center - step, center + step]) {
+      if (d < min || d > max) continue;
+      const s = await sharpnessAt(d);
+      if (s > bestSharp) { bestSharp = s; best = d; }
+    }
+  }
+  await setFocus(best);
+  return true;
+}
+
+async function focusAt(uv, cx, cy) {
+  const token = ++afToken, live = state.mode === 'live';
+  state.focusPt = uv;
+  showReticle(cx, cy);
+  if (!state.lock) state.lock = { af: false, iso: state.iso };
+  const stats = regionStats(live ? video : stillCanvas, uv);
+  if (stats) { // spot meter: expose the tapped spot as mid grey
+    state.iso = nearestIso(800 * 2 ** Math.log2(0.18 / Math.max(stats.light, 1e-4)));
+    syncHud();
+  }
+  requestRender();
+  let af = false;
+  if (live) {
+    $('reticle').classList.add('hunting');
+    try { af = await contrastAF(uv, token); } catch { af = false; }
+  }
+  if (token !== afToken) return;
+  state.lock.af = state.lock.af || af;
+  $('reticle').classList.remove('hunting');
+  $('reticle').classList.add('locked');
+  $('reticleTag').textContent = af ? 'AF·AE LOCK' : live ? 'AE LOCK' : 'FOCUS POINT';
+  $('lockText').textContent = state.lock.af ? 'AF·AE LOCK' : 'AE LOCK';
+  $('lockBadge').hidden = false;
+  if (live && !af && !focusNoteShown) {
+    focusNoteShown = true;
+    toast('This camera doesn’t allow focus control here, so focus stays automatic. The tap set exposure.');
+  }
+}
+
+function showReticle(cx, cy) {
+  const r = $('reticle'), box = $('view').getBoundingClientRect();
+  r.style.left = cx - box.left + 'px';
+  r.style.top = cy - box.top + 'px';
+  r.classList.remove('locked', 'hunting');
+  $('reticleTag').textContent = state.mode === 'live' ? 'AF' : 'FOCUS POINT';
+  r.hidden = false;
+  r.style.animation = 'none'; void r.offsetWidth; r.style.animation = ''; // replay the pop-in
+}
+
+function resetFocus() {
+  afToken++;
+  if (state.lock && state.lock.iso != null) { state.iso = state.lock.iso; syncHud(); }
+  state.lock = null;
+  state.focusPt = [0.5, 0.5];
+  $('reticle').hidden = true;
+  $('lockBadge').hidden = true;
+  requestRender();
+}
+
+$('lockBadge').addEventListener('click', () => {
+  const hadAf = !!(state.lock && state.lock.af);
+  if (hadAf && recording) { toast('Stop recording to unlock focus.'); return; }
+  resetFocus();
+  if (hadAf && state.mode === 'live') startCamera({ quiet: true }); // a fresh stream brings back continuous autofocus
+});
+
+// Map a tap on the viewfinder to a point in the source frame, undoing the crop, mirror and turn.
+function screenToSource(x, y) {
+  if (!geo) return null;
+  const turn = state.capture === 'video' && state.mode === 'live' ? state.videoTurn : 0;
+  const r = canvas.getBoundingClientRect(), a = (turn * Math.PI) / 180;
+  const dx = x - (r.left + r.width / 2), dy = y - (r.top + r.height / 2);
+  const ox = 0.5 + (dx * Math.cos(a) - dy * Math.sin(a)) / parseFloat(canvas.style.width);
+  const oy = 0.5 + (dx * Math.sin(a) + dy * Math.cos(a)) / parseFloat(canvas.style.height);
+  if (ox < 0 || ox > 1 || oy < 0 || oy > 1) return null;
+  let s = turn === 90 ? [oy, 1 - ox] : turn === 180 ? [1 - ox, 1 - oy] : turn === 270 ? [1 - oy, ox] : [ox, oy];
+  if (state.mode === 'live' && state.facing === 'user') s = [1 - s[0], s[1]];
+  return [geo.crop[0] + s[0] * geo.crop[2], geo.crop[1] + s[1] * geo.crop[3]];
+}
+
 /* ---------- Camera ---------- */
-async function startCamera() {
+// `quiet` restarts (switching lens, unlocking focus) keep the last frame on screen.
+async function startCamera({ quiet = false, retried = false } = {}) {
   stopCamera();
+  if (!quiet) resetFocus();
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
     return setNoCam('This browser has no live camera access.');
   }
-  setMode('boot');
+  if (!quiet) setMode('boot');
   const hd = state.res === 'hd';
+  const lensId = state.facing === 'environment' ? lensIds[lensDevice(state.lens)] : null;
+  camConstraints = { width: { ideal: hd ? 1920 : 3840 }, height: { ideal: hd ? 1080 : 2160 }, frameRate: { ideal: 30 } };
+  // Asking for one physical lens by id stops iOS from switching lenses on its own.
+  if (lensId) camConstraints.deviceId = { exact: lensId }; else camConstraints.facingMode = { ideal: state.facing };
   try {
-    stream = await navigator.mediaDevices.getUserMedia({
-      audio: false,
-      video: { facingMode: { ideal: state.facing }, width: { ideal: hd ? 1920 : 3840 }, height: { ideal: hd ? 1080 : 2160 }, frameRate: { ideal: 30 } },
-    });
+    stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: camConstraints });
   } catch (err) {
+    if (lensId && !retried) { // a remembered lens id can go stale
+      lensIds = {};
+      prefs.set('lensIds', lensIds);
+      return startCamera({ quiet, retried: true });
+    }
     const why = err && err.name === 'NotAllowedError' ? 'Camera access is blocked for this page.'
       : err && err.name === 'NotFoundError' ? 'No camera was found.' : 'The camera could not be started.';
     return setNoCam(why, err && err.name === 'NotAllowedError');
@@ -1173,6 +1482,12 @@ async function startCamera() {
   setMode('live');
   startLoop();
   ensureMic();
+  if (state.facing === 'environment' && (await detectLenses()) && !retried) {
+    // The first start can land on a virtual multi-lens camera; switch to the chosen physical lens.
+    const want = lensIds[lensDevice(state.lens)], have = stream.getVideoTracks()[0].getSettings().deviceId;
+    if (want && have && want !== have) return startCamera({ quiet: true, retried: true });
+  }
+  buildLenses();
 }
 
 function stopCamera() {
@@ -1206,6 +1521,7 @@ function setMode(mode) {
   if (mode === 'boot') showNotice('STARTING', 'Starting the camera', 'Allow camera access when your iPhone asks.', false);
   $('srcInfo').textContent = '';
   syncCapture();
+  buildLenses();
 }
 
 /* ---------- Stills (imported, shot with the iPhone camera, or re-graded) ---------- */
@@ -1239,6 +1555,7 @@ function enterStill() {
 async function openStill(file) {
   if (!file) return;
   endRegrade();
+  resetFocus();
   if (await loadStill(file)) enterStill();
 }
 
@@ -1268,6 +1585,7 @@ async function startRegrade(rec) {
   if (!(await loadStill(src))) return;
   closeViewer();
   $('gallery').hidden = true;
+  resetFocus();
   if (!state.editing) liveSettings = gradeSettings();
   state.editing = rec;
   applySettings(rec.settings || {}, false);
@@ -1479,6 +1797,8 @@ function syncHud() {
   $('wbVal').textContent = state.kelvin + 'K';
   $('frameVal').textContent = state.frame;
   $('hudFc').setAttribute('aria-pressed', String(state.falseColor));
+  $('irisVal').textContent = ADJ.iris.format(state.iris);
+  $('hudIris').querySelector('small').textContent = state.iris === 'lens' ? 'Iris' : 'Iris sim';
 }
 
 /* ISO / WB adjust panel */
@@ -1494,7 +1814,15 @@ const ADJ = {
     label: 'White balance', values: KELVINS, key: 'kelvin', base: 5600, hud: 'hudWb',
     note: 'Relative to the light in the scene. Lower is cooler, higher is warmer.',
     sub: (v) => (v === 5600 ? 'as shot' : v < 5600 ? 'cooler' : 'warmer'),
+    format: (v) => v + 'K',
     track: 'linear-gradient(90deg, #4f86d9, #d7d4cc 58%, #e2a24c)', scale: ['2800K', '5600K', '8000K'],
+  },
+  iris: {
+    label: 'Iris', values: IRIS, key: 'iris', base: 'lens', hud: 'hudIris',
+    note: 'iPhone lenses have a fixed aperture. An f-stop here simulates its depth of field: the picture softens with distance from the spot you tap.',
+    sub: (v) => (v === 'lens' ? 'lens as it is' : 'simulated depth of field'),
+    format: (v) => 'f/' + (v === 'lens' ? lensSpec().fnum : v),
+    track: 'linear-gradient(90deg, #d9d6cc, #26262a)', scale: ['f/1.4', 'f/4', 'Lens'],
   },
 };
 
@@ -1502,8 +1830,7 @@ function openAdjust(which) {
   if (adjusting === which) return closeAdjust();
   adjusting = which;
   const a = ADJ[which];
-  $('hudIso').setAttribute('aria-expanded', String(which === 'iso'));
-  $('hudWb').setAttribute('aria-expanded', String(which === 'wb'));
+  for (const k in ADJ) $(ADJ[k].hud).setAttribute('aria-expanded', String(k === which));
   $('adjLabel').textContent = a.label;
   $('adjNote').textContent = a.note;
   const r = $('adjRange');
@@ -1517,21 +1844,22 @@ function openAdjust(which) {
 
 function showAdjValue() {
   const a = ADJ[adjusting], v = state[a.key];
-  $('adjValue').textContent = v + (adjusting === 'wb' ? 'K' : '');
+  $('adjValue').textContent = a.format ? a.format(v) : v;
   $('adjSub').textContent = a.sub(v);
 }
 
 function closeAdjust() {
   adjusting = null;
   $('adjust').hidden = true;
-  $('hudIso').setAttribute('aria-expanded', 'false');
-  $('hudWb').setAttribute('aria-expanded', 'false');
+  for (const k in ADJ) $(ADJ[k].hud).setAttribute('aria-expanded', 'false');
 }
 
 $('adjRange').addEventListener('input', (e) => {
   const a = ADJ[adjusting];
   state[a.key] = a.values[+e.target.value];
   prefs.set(a.key, state[a.key]);
+  if (a.key === 'iso' && state.lock) state.lock.iso = null; // a manual ISO stays when the lock is released
+  if (a.key === 'iris' && state.mode === 'still') uploadSource(stillCanvas); // rebuild the blur's mipmaps
   showAdjValue(); syncHud(); requestRender();
 });
 $('adjReset').addEventListener('click', () => {
@@ -1542,6 +1870,7 @@ $('adjReset').addEventListener('click', () => {
 });
 $('hudIso').addEventListener('click', () => openAdjust('iso'));
 $('hudWb').addEventListener('click', () => openAdjust('wb'));
+$('hudIris').addEventListener('click', () => openAdjust('iris'));
 $('hudFrame').addEventListener('click', () => {
   const i = FRAMES.findIndex((f) => f.id === state.frame);
   state.frame = FRAMES[(i + 1) % FRAMES.length].id;
@@ -1554,7 +1883,14 @@ $('hudFc').addEventListener('click', () => {
   syncHud(); requestRender();
   toast(state.falseColor ? 'False color on: green is mid grey, pink is skin, red is clipping' : 'False color off');
 });
-$('view').addEventListener('click', (e) => { if (adjusting && !e.target.closest('.adjust')) closeAdjust(); });
+// Tapping the viewfinder focuses and meters at that spot; with a panel open it just closes it.
+$('view').addEventListener('click', (e) => {
+  if (e.target.closest('.adjust, .lenses, .lock-badge, .notice')) return;
+  if (adjusting) { closeAdjust(); return; }
+  if (state.mode !== 'live' && state.mode !== 'still') return;
+  const uv = screenToSource(e.clientX, e.clientY);
+  if (uv) focusAt(uv, e.clientX, e.clientY);
+});
 
 $('looks').addEventListener('click', (e) => {
   const b = e.target.closest('.chip');
@@ -1577,13 +1913,15 @@ $('shutter').addEventListener('click', async () => {
   busy = true;
   $('shutter').disabled = true;
   try {
-    if (state.mode === 'live') { flash(); grabLiveFrame(); }
-    const shot = await renderPhoto();
+    let focus = state.focusPt;
+    if (state.mode === 'live') { flash(); focus = liveToStill(state.focusPt, grabLiveFrame()); }
+    const shot = await renderPhoto(focus);
     if (state.editing) {
       const rec = await updateShot(state.editing, shot);
       toast('Re-graded ' + rec.name);
     } else {
-      const rec = await storeShot(shot, await toJpeg(stillCanvas, 0.95));
+      // The focus point is stored in the saved frame's coordinates, for re-grading.
+      const rec = await storeShot(shot, await toJpeg(stillCanvas, 0.95), { settings: { ...gradeSettings(), focusPt: focus } });
       toast('Saved ' + rec.name);
     }
     if (state.mode === 'still') leaveStill();
@@ -1767,7 +2105,7 @@ async function openViewer(rec) {
   $('viewerMeta').innerHTML = '';
   const s = rec.settings || {};
   const label = (list, id) => (list.find((x) => x.id === id) || {}).label || '';
-  for (const [k, v] of [['LOOK', rec.look], ['ISO', s.iso], ['WB', s.kelvin && s.kelvin + 'K'], ['CONTRAST', label(CONTRASTS, s.contrast)], ['ROLL-OFF', label(ROLLOFFS, s.rolloff)], ['', new Date(rec.edited || rec.created).toLocaleString()]]) {
+  for (const [k, v] of [['LOOK', rec.look], ['ISO', s.iso], ['WB', s.kelvin && s.kelvin + 'K'], ['CONTRAST', label(CONTRASTS, s.contrast)], ['ROLL-OFF', label(ROLLOFFS, s.rolloff)], ['IRIS', s.iris && s.iris !== 'lens' ? 'f/' + s.iris + ' (simulated)' : ''], ['', new Date(rec.edited || rec.created).toLocaleString()]]) {
     if (!v) continue;
     const span = document.createElement('span');
     if (k) { const b = document.createElement('b'); b.textContent = k + ' '; span.appendChild(b); }
