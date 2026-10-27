@@ -152,7 +152,7 @@ input[type="range"]::-moz-range-thumb { width: 18px; height: 18px; border-radius
 .shutter span { width: 60px; height: 60px; border-radius: 50%; background: var(--text); transition: transform 0.15s, border-radius 0.2s; display: grid; place-items: center; }
 .shutter:active span { transform: scale(0.88); }
 [data-capture="video"] .shutter span { background: var(--rec); }
-[data-rec="true"] .shutter span { transform: scale(0.5); border-radius: 12px; }
+[data-rec="true"] .shutter span, [data-counting="true"] .shutter span { transform: scale(0.5); border-radius: 12px; }
 .shutter svg { display: none; width: 28px; height: 28px; }
 [data-mode="still"] .shutter span { background: var(--text); color: var(--ink); }
 [data-mode="still"] .shutter svg.ok { display: block; }
@@ -171,12 +171,21 @@ input[type="range"]::-moz-range-thumb { width: 18px; height: 18px; border-radius
   font: 500 13px var(--mono); font-variant-numeric: tabular-nums; pointer-events: none;
 }
 .rec-tc i { width: 8px; height: 8px; border-radius: 50%; background: var(--rec); }
-.hdr-btn {
-  position: absolute; top: 12px; left: max(12px, env(safe-area-inset-left, 0px)); padding: 5px 10px; border-radius: 6px;
+.view-tools { position: absolute; top: 12px; left: max(12px, env(safe-area-inset-left, 0px)); display: flex; gap: 8px; }
+.tool-btn {
+  display: flex; align-items: center; gap: 5px; padding: 5px 10px; border-radius: 6px;
   background: rgba(0, 0, 0, 0.55); border: 1px solid rgba(255, 255, 255, 0.22); color: var(--dim); font: 700 11px var(--mono); letter-spacing: 0.08em;
 }
-.hdr-btn:not([data-level="off"]) { color: var(--af); border-color: var(--af); }
-[data-mode="boot"] .hdr-btn, [data-mode="nocam"] .hdr-btn { display: none; }
+.tool-btn svg { width: 13px; height: 13px; }
+.hdr-btn:not([data-level="off"]), .timer-btn[data-on="true"] { color: var(--af); border-color: var(--af); }
+[data-mode="boot"] .view-tools, [data-mode="nocam"] .view-tools { display: none; }
+[data-mode="still"] .timer-btn { display: none; }
+.countdown {
+  position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none;
+  font: 300 132px/1 var(--sans); color: #fff; text-shadow: 0 0 2px rgba(0, 0, 0, 0.5), 0 2px 28px rgba(0, 0, 0, 0.75); font-variant-numeric: tabular-nums;
+}
+.countdown span { display: inline-block; transform: rotate(var(--ui-rot, 0deg)); animation: count-pop 1s ease-out both; }
+@keyframes count-pop { 0% { opacity: 0; scale: 1.4; } 12% { opacity: 1; scale: 1; } 80% { opacity: 1; } 100% { opacity: 0.35; scale: 0.94; } }
 
 /* Focus, lenses */
 .reticle { position: absolute; width: 76px; height: 76px; margin: -38px 0 0 -38px; border: 1.5px solid var(--af); pointer-events: none; animation: reticle-in 0.25s ease-out; }
@@ -265,6 +274,24 @@ legend { padding: 0; margin-bottom: 8px; font-weight: 600; }
 .g-grid { flex: 1; overflow-y: auto; display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 3px; padding: 3px max(3px, env(safe-area-inset-right, 0px)) 3px max(3px, env(safe-area-inset-left, 0px)); align-content: start; }
 .g-grid button { aspect-ratio: 1; background: var(--panel); overflow: hidden; position: relative; }
 .g-grid img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.g-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.g-bar {
+  display: flex; align-items: center; justify-content: center; gap: 10px; flex-wrap: wrap; border-top: 1px solid var(--line);
+  padding: 12px max(16px, env(safe-area-inset-right, 0px)) 12px max(16px, env(safe-area-inset-left, 0px));
+}
+.g-bar .btn { flex: 1 1 0; max-width: 220px; }
+.g-bar .btn:disabled { opacity: 0.4; }
+.g-bar span { flex-basis: 100%; text-align: center; }
+.g-note { color: var(--dim); font-size: 13px; }
+/* Selecting: an empty ring on each tile, a filled check on chosen ones */
+.selecting .g-grid button::after {
+  content: ""; position: absolute; right: 6px; top: 6px; width: 22px; height: 22px; border-radius: 50%;
+  border: 2px solid #fff; background: rgba(0, 0, 0, 0.25); box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.3);
+}
+.selecting .g-grid button[aria-pressed="true"] img { opacity: 0.6; }
+.selecting .g-grid button[aria-pressed="true"]::after {
+  background: var(--rec) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 12.5l4 4L18 8'/%3E%3C/svg%3E") center / 15px no-repeat;
+}
 .g-dur { position: absolute; right: 4px; bottom: 4px; font: 600 11px var(--mono); background: rgba(0, 0, 0, 0.7); border-radius: 4px; padding: 1px 5px; }
 .g-dur::before { content: "▶ "; font-size: 9px; }
 .g-empty { grid-column: 1 / -1; padding: 48px 16px; text-align: center; color: var(--dim); }
@@ -331,7 +358,13 @@ legend { padding: 0; margin-bottom: 8px; font-weight: 600; }
     <div class="zoom-readout" id="zoomReadout" hidden>1×</div>
     <div class="ai-tag" id="aiTag" hidden><i></i>AI · SKIN</div>
     <button class="lock-badge" id="lockBadge" hidden aria-label="Unlock focus"><span id="lockText">AF LOCK</span><b aria-hidden="true">×</b></button>
-    <button class="hdr-btn" id="hdrBtn" data-level="off" aria-label="HDR off">HDR OFF</button>
+    <div class="view-tools">
+      <button class="tool-btn hdr-btn" id="hdrBtn" data-level="off" aria-label="HDR off">HDR OFF</button>
+      <button class="tool-btn timer-btn" id="timerBtn" data-on="false" aria-label="Timer off">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="13.5" r="7.5"/><path d="M12 13.5V9.5M9.5 3h5"/></svg><span id="timerText">OFF</span>
+      </button>
+    </div>
+    <div class="countdown" id="countdown" hidden aria-live="assertive"></div>
     <div class="rec-tc" id="recTc" hidden><i></i><b>REC</b><span id="recTime">00:00:00:00</span></div>
     <div class="toast hide" id="toast" role="status" aria-live="polite"></div>
   </main>
@@ -424,9 +457,23 @@ legend { padding: 0; margin-bottom: 8px; font-weight: 600; }
 <section class="gallery" id="gallery" hidden aria-labelledby="galleryTitle">
   <div class="g-head">
     <div><h2 id="galleryTitle">Roll</h2><span id="galleryCount"></span></div>
-    <button class="btn" id="galleryClose">Close</button>
+    <div class="g-actions">
+      <button class="btn" id="gallerySelectAll" hidden>Select all</button>
+      <button class="btn" id="gallerySelect">Select</button>
+      <button class="btn" id="galleryClose">Close</button>
+    </div>
   </div>
   <div class="g-grid" id="galleryGrid"></div>
+  <div class="g-bar" id="galleryBar" hidden>
+    <span class="g-note" id="selNote" hidden></span>
+    <button class="btn primary" id="selSave" disabled>Save to Photos</button>
+    <button class="btn danger" id="selDelete" disabled>Delete</button>
+  </div>
+  <div class="g-bar" id="galleryConfirm" hidden>
+    <span id="selConfirmText"></span>
+    <button class="btn" id="selKeep">Cancel</button>
+    <button class="btn danger" id="selDeleteYes">Delete</button>
+  </div>
   <div class="viewer" id="viewer" hidden>
     <div class="g-head">
       <div><h2 id="viewerName"></h2><span id="viewerDims"></span></div>
@@ -513,6 +560,7 @@ const state = {
   physLens: 'wide',        // the back camera to open: ultra | wide | tele
   skin: prefs.get('skin', true), // AI: keep people's skin natural
   hdr: prefs.get('hdr', 'off'),  // off | natural | strong
+  timer: prefs.get('timer', 0),  // self-timer seconds: 0, 3 or 10
   iris: prefs.get('iris', 'lens'),
   focusPt: [0.5, 0.5],     // focus point in the source frame (0..1), also the center of the simulated depth of field
   focusPrev: [0.5, 0.5],   // the previous focus point while the simulated depth of field racks to the new one
@@ -591,6 +639,11 @@ const LOOKS = [
   { id: 'teal', name: 'Teal & Amber', contrast: 1.45, mid: 0.16, white: 7, perChannel: 0.45, sat: 1.06, wb: [1, 1, 1],
     hues: [{ h: 264, w: 40, shift: -42, sat: 0.95 }, { h: 142, w: 34, shift: 34, sat: 0.78 }, { h: 195, w: 22, shift: 6, sat: 1 }, { h: 58, w: 30, shift: -5, sat: 1.14 }, { h: 29, w: 18, shift: 6, sat: 0.92 }],
     shadow: [-0.045, 0.012, 0.035], high: [0.045, 0.012, -0.045], lift: 0.008 },
+  // Night city: magenta, cyan and violet pushed hard, greens turned teal, deep violet-black shadows.
+  // `glow` adds a bloom around bright lights in the renderer, so signs and lamps glow in their own color.
+  { id: 'neon', name: 'Neon & Glow', contrast: 1.5, mid: 0.15, white: 7, perChannel: 0.3, sat: 1.2, wb: [1, 0.97, 1.05], glow: 0.6,
+    hues: [{ h: 142, w: 36, shift: 42, sat: 0.95 }, { h: 110, w: 22, shift: -30, sat: 1.1 }, { h: 264, w: 34, shift: 30, sat: 1.25 }, { h: 195, w: 26, shift: 4, sat: 1.3 }, { h: 330, w: 34, shift: 0, sat: 1.3 }, { h: 29, w: 16, shift: -12, sat: 1.15 }, { h: 55, w: 16, shift: 0, sat: 0.86 }],
+    shadow: [0.014, -0.012, 0.045], high: [0.012, -0.004, 0.02], lift: -0.012 },
   { id: 'bleach', name: 'Bleach', contrast: 1.85, mid: 0.15, white: 6, perChannel: 0.3, sat: 0.52, wb: [0.98, 1, 1.02],
     hues: [], shadow: [-0.006, 0, 0.01], high: [0, 0, 0], lift: 0 },
   { id: 'noir', name: 'Noir', contrast: 1.6, mid: 0.16, white: 6, perChannel: 0, sat: 0, wb: [1, 1, 1], mono: [0.5, 0.42, 0.08],
@@ -744,6 +797,39 @@ void main() {
   gl_Position = vec4(aPos, 0.0, 1.0);
 }`;
 
+// Shared by the main and glow shaders: decoding the camera's sRGB and restoring the highlight range it clipped.
+const GLSL_LIGHT = `
+vec3 srgbToLin(vec3 c) { return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c)); }
+vec3 restoreHighlights(vec3 lin) {
+  if (uExpandA > 0.0) {
+    float m = max(max(lin.r, lin.g), lin.b);
+    float me = m * (1.0 - uExpandA * 0.18) / (1.0 - uExpandA * min(m, 0.999));
+    lin *= m > 1e-5 ? me / m : 1.0;
+  }
+  return lin;
+}`;
+
+// Neon & Glow, first pass: a quarter-size copy of the frame holding only its bright light. Highlights are
+// restored pixel by pixel before the copy is shrunk, so a thin neon tube keeps its full brightness.
+const GLOW_FS = `#version 300 es
+precision highp float;
+uniform sampler2D uImage;
+uniform float uExpandA;
+uniform vec3 uGain;      // white balance and exposure
+uniform vec2 uKnee;      // light starts to glow at x and fully glows at y (scene linear)
+uniform float uStore;    // 1 for float storage; 1/8 to fit light up to 8x white into 8 bits
+out vec4 outColor;
+${GLSL_LIGHT}
+void main() {
+  ivec2 size = textureSize(uImage, 0), base = ivec2(gl_FragCoord.xy) * 4;
+  vec3 acc = vec3(0.0);
+  for (int y = 0; y < 4; y++) for (int x = 0; x < 4; x++) {
+    vec3 c = restoreHighlights(srgbToLin(texelFetch(uImage, min(base + ivec2(x, y), size - 1), 0).rgb)) * uGain;
+    acc += c * smoothstep(uKnee.x, uKnee.y, max(max(c.r, c.g), c.b));
+  }
+  outColor = vec4(acc * (uStore / 16.0), 1.0);
+}`;
+
 const FS = `#version 300 es
 precision highp float;
 precision highp sampler3D;
@@ -779,6 +865,10 @@ uniform float uCropShortPx;
 uniform float uBlurPx;     // simulated depth of field: blur radius far from focus, in source pixels
 uniform float uHdr;        // HDR tone mapping strength (0 = off)
 uniform vec2 uHdrLod;      // mip levels for the fine and coarse brightness estimates
+uniform float uGlow;       // Neon & Glow: strength of the bloom around bright lights (0 = off)
+uniform vec3 uGlowLod;     // mip levels (in source pixels) for the tight, medium and wide glow
+uniform sampler2D uGlowTex; // bright light from the glow pass, a quarter of the source size, with mipmaps
+uniform float uGlowScale;  // undoes the glow pass's storage scale
 out vec4 outColor;
 
 const mat3 M709to2020 = mat3(
@@ -790,7 +880,7 @@ const mat3 M709toRWG = mat3(
   0.36014816, 0.767968312, 0.273494657,
   0.097905656, 0.155042358, 0.667633009);
 
-vec3 srgbToLin(vec3 c) { return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c)); }
+${GLSL_LIGHT}
 vec3 linToSrgb(vec3 c) { c = max(c, 0.0); return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c)); }
 float appleLog(float r) {
   if (r >= 0.01) return 0.08550479 * log2(r + 0.00964052) + 0.69336945;
@@ -807,15 +897,21 @@ float hash(vec2 p) {
   return fract((p3.x + p3.y) * p3.z);
 }
 
-vec3 restoreHighlights(vec3 lin) {
-  if (uExpandA > 0.0) {
-    float m = max(max(lin.r, lin.g), lin.b);
-    float me = m * (1.0 - uExpandA * 0.18) / (1.0 - uExpandA * min(m, 0.999));
-    lin *= m > 1e-5 ? me / m : 1.0;
-  }
-  return lin;
-}
 vec3 fetchLin(vec2 uv, float lod) { return restoreHighlights(srgbToLin(textureLod(uImage, uv, lod).rgb)); }
+const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
+
+// Bright light spread over about 2^lod source pixels. Eight taps on a ring one texel of that mip
+// level out smooth away its blockiness.
+vec3 glowAt(float lod) {
+  vec2 texel = exp2(lod) / uTexSize;
+  float l = max(lod - 2.0, 0.0); // the glow texture is a quarter of the source size
+  vec3 acc = textureLod(uGlowTex, vSrc, l).rgb;
+  for (int i = 0; i < 8; i++) {
+    float a = float(i) * 0.78539816 + 0.3926991;
+    acc += textureLod(uGlowTex, vSrc + vec2(cos(a), sin(a)) * texel, l).rgb;
+  }
+  return acc * (uGlowScale / 9.0);
+}
 
 void main() {
   // Simulated depth of field: a disc blur that grows with distance from the focus point.
@@ -847,7 +943,6 @@ void main() {
   // shadows open up, while local detail stays. The base brightness blends two blur sizes; near a
   // strong edge the smaller one takes over, which keeps bright and dark areas from haloing.
   if (uHdr > 0.0) {
-    const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
     float l0 = log2(max(dot(lin, LUMA), 1e-5));
     float fine = log2(max(dot(fetchLin(vSrc, uHdrLod.x), LUMA), 1e-5));
     float coarse = log2(max(dot(fetchLin(vSrc, uHdrLod.y), LUMA), 1e-5));
@@ -855,6 +950,10 @@ void main() {
     lin *= exp2(clamp(-uHdr * (base - log2(0.18)), -2.5, 2.5));
   }
   lin *= uWB * uExposure;
+  if (uGlow > 0.0) {
+    vec3 g = 0.3 * glowAt(uGlowLod.x) + 0.4 * glowAt(uGlowLod.y) + 0.3 * glowAt(uGlowLod.z);
+    lin += uGlow * max(mix(vec3(dot(g, LUMA)), g, 1.3), 0.0); // neon glows in its own color, a little richer
+  }
   vec3 enc;
   if (uInput > 1.5) {
     vec3 w = M709toRWG * lin;
@@ -921,7 +1020,7 @@ function initGL() {
   if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
   GL.prog = prog;
   GL.u = {};
-  for (const name of ['uCrop', 'uFlip', 'uTurn', 'uImage', 'uLut', 'uLutSize', 'uLutMin', 'uLutMax', 'uInput', 'uExpandA', 'uExposure', 'uWB', 'uGrain', 'uSeed', 'uAspect', 'uVignette', 'uFalseColor', 'uFocusPt', 'uFocusPrev', 'uFocusMix', 'uTexSize', 'uCropShortPx', 'uBlurPx', 'uSnap', 'uSnapCrop', 'uSnapMix', 'uMask', 'uMaskCrop', 'uSkin', 'uSkinLut', 'uSkinLutSize', 'uHdr', 'uHdrLod']) {
+  for (const name of ['uCrop', 'uFlip', 'uTurn', 'uImage', 'uLut', 'uLutSize', 'uLutMin', 'uLutMax', 'uInput', 'uExpandA', 'uExposure', 'uWB', 'uGrain', 'uSeed', 'uAspect', 'uVignette', 'uFalseColor', 'uFocusPt', 'uFocusPrev', 'uFocusMix', 'uTexSize', 'uCropShortPx', 'uBlurPx', 'uSnap', 'uSnapCrop', 'uSnapMix', 'uMask', 'uMaskCrop', 'uSkin', 'uSkinLut', 'uSkinLutSize', 'uHdr', 'uHdrLod', 'uGlow', 'uGlowLod', 'uGlowTex', 'uGlowScale']) {
     GL.u[name] = gl.getUniformLocation(prog, name);
   }
   GL.vao = gl.createVertexArray();
@@ -945,6 +1044,20 @@ function initGL() {
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, 1, 1, 0, gl.RED, gl.UNSIGNED_BYTE, new Uint8Array([0]));
   }
   GL.maxTex = Math.min(gl.getParameter(gl.MAX_TEXTURE_SIZE), gl.getParameter(gl.MAX_RENDERBUFFER_SIZE));
+
+  // Neon & Glow's bright-light pass draws with the same quad.
+  const glowProg = gl.createProgram();
+  gl.attachShader(glowProg, compile(gl.VERTEX_SHADER, VS));
+  gl.attachShader(glowProg, compile(gl.FRAGMENT_SHADER, GLOW_FS));
+  gl.bindAttribLocation(glowProg, loc, 'aPos');
+  gl.linkProgram(glowProg);
+  if (!gl.getProgramParameter(glowProg, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(glowProg));
+  GL.glowProg = glowProg;
+  GL.glowU = {};
+  for (const name of ['uImage', 'uExpandA', 'uGain', 'uKnee', 'uStore']) GL.glowU[name] = gl.getUniformLocation(glowProg, name);
+  // Float storage keeps the glow's faint edges smooth; without it, 8 bits.
+  GL.floatGlow = !!(gl.getExtension('EXT_color_buffer_float') || gl.getExtension('EXT_color_buffer_half_float'));
+  GL.glow = null;
   return true;
 }
 
@@ -1052,6 +1165,53 @@ function uploadSource(el) {
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, mips ? gl.LINEAR_MIPMAP_LINEAR : gl.LINEAR);
 }
 
+// Bloom strength of the current look (Neon & Glow); imported LUTs don't glow.
+function lookGlow() {
+  return state.look === 'custom' ? 0 : (LOOKS.find((l) => l.id === state.look) || LOOKS[0]).glow || 0;
+}
+
+function makeGlowTarget(w, h, float) {
+  const tex = gl.createTexture(), fbo = gl.createFramebuffer();
+  gl.bindTexture(gl.TEXTURE_2D, tex);
+  gl.texStorage2D(gl.TEXTURE_2D, Math.floor(Math.log2(Math.max(w, h))) + 1, float ? gl.RGBA16F : gl.RGBA8, w, h);
+  for (const [k, v] of [[gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR], [gl.TEXTURE_MAG_FILTER, gl.LINEAR], [gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE], [gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE]]) gl.texParameteri(gl.TEXTURE_2D, k, v);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+  if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE) return { w, h, tex, fbo, scale: float ? 1 : 8 };
+  gl.deleteTexture(tex); gl.deleteFramebuffer(fbo);
+  return null;
+}
+
+// Neon & Glow's first pass: the frame's bright light at a quarter size, then its mipmaps, which the
+// main pass samples at three sizes for the bloom.
+function renderGlow(geom) {
+  const w = Math.max(1, Math.ceil(geom.srcW / 4)), h = Math.max(1, Math.ceil(geom.srcH / 4));
+  const prev = gl.getParameter(gl.FRAMEBUFFER_BINDING);
+  if (!GL.glow || GL.glow.w !== w || GL.glow.h !== h) {
+    if (GL.glow) { gl.deleteTexture(GL.glow.tex); gl.deleteFramebuffer(GL.glow.fbo); }
+    GL.glow = (GL.floatGlow && makeGlowTarget(w, h, true)) || makeGlowTarget(w, h, false);
+    if (GL.glow && GL.glow.scale !== 1) GL.floatGlow = false;
+  }
+  const u = GL.glowU;
+  gl.bindFramebuffer(gl.FRAMEBUFFER, GL.glow.fbo);
+  gl.viewport(0, 0, w, h);
+  gl.useProgram(GL.glowProg);
+  gl.bindVertexArray(GL.vao);
+  gl.uniform1i(u.uImage, 0);
+  gl.uniform1f(u.uExpandA, EXPAND_A);
+  gl.uniform3fv(u.uGain, wbGains(state.kelvin).map((v) => v * state.iso / 800));
+  gl.uniform2f(u.uKnee, 1, 3.5);
+  gl.uniform1f(u.uStore, 1 / GL.glow.scale);
+  gl.activeTexture(gl.TEXTURE5);
+  gl.bindTexture(gl.TEXTURE_2D, null);
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, GL.frameTex);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  gl.bindTexture(gl.TEXTURE_2D, GL.glow.tex);
+  gl.generateMipmap(gl.TEXTURE_2D);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, prev);
+}
+
 // Blur radius in source pixels for the simulated iris, at full distance from focus.
 function irisBlurPx(geom) {
   if (state.iris === 'lens') return 0;
@@ -1062,6 +1222,8 @@ function irisBlurPx(geom) {
 function draw(w, h, { capture = false, mirror = false, turn = 0, geom = geo, focus = state.focusPt, snapMix = 0, snapCrop = null, seed = Math.random() * 500 } = {}) {
   const racking = !capture && focus === state.focusPt; // photos are saved fully focused on the target
   const lut = activeLut(), u = GL.u, skinOn = skinReady(), skin = skinOn ? bakedLut(LOOKS[0]) : null;
+  const glow = lookGlow();
+  if (glow > 0) renderGlow(geom);
   gl.viewport(0, 0, w, h);
   gl.useProgram(GL.prog);
   gl.bindVertexArray(GL.vao);
@@ -1091,6 +1253,10 @@ function draw(w, h, { capture = false, mirror = false, turn = 0, geom = geo, foc
   const visH = geom.crop[3] * geom.srcH; // brightness is judged over about 1/72 and 1/18 of the picture
   gl.uniform1f(u.uHdr, HDR_LEVELS[state.hdr] || 0);
   gl.uniform2f(u.uHdrLod, Math.log2(Math.max(1, visH / 72)), Math.log2(Math.max(1, visH / 18)));
+  gl.uniform1f(u.uGlow, glow);
+  gl.uniform1i(u.uGlowTex, 5);
+  gl.uniform1f(u.uGlowScale, GL.glow ? GL.glow.scale : 1);
+  gl.uniform3f(u.uGlowLod, Math.log2(Math.max(1, visH / 120)), Math.log2(Math.max(1, visH / 40)), Math.log2(Math.max(1, visH / 14))); // about 1/120, 1/40 and 1/14 of the picture
   gl.uniform1i(u.uSnap, 4);
   gl.uniform4fv(u.uSnapCrop, snapCrop || geom.crop);
   gl.uniform1f(u.uSnapMix, snapMix);
@@ -1107,6 +1273,8 @@ function draw(w, h, { capture = false, mirror = false, turn = 0, geom = geo, foc
   gl.bindTexture(gl.TEXTURE_3D, skin ? skin.tex : null);
   gl.activeTexture(gl.TEXTURE4);
   gl.bindTexture(gl.TEXTURE_2D, GL.snapTex);
+  gl.activeTexture(gl.TEXTURE5);
+  gl.bindTexture(gl.TEXTURE_2D, glow > 0 ? GL.glow.tex : GL.maskTex);
   gl.activeTexture(gl.TEXTURE0);
   gl.bindTexture(gl.TEXTURE_2D, GL.frameTex);
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
@@ -1342,10 +1510,11 @@ function syncCapture() {
     b.setAttribute('aria-checked', String(b.dataset.capture === app.dataset.capture));
     if (b.dataset.capture === 'video' && !recording) b.disabled = !canVideo;
   }
-  if (state.mode === 'live') $('shutter').setAttribute('aria-label', app.dataset.capture === 'video' ? (recording ? 'Stop recording' : 'Start recording') : 'Take photo');
+  if (state.mode === 'live') $('shutter').setAttribute('aria-label', countdown ? 'Cancel timer' : app.dataset.capture === 'video' ? (recording ? 'Stop recording' : 'Start recording') : 'Take photo');
 }
 
 function setCapture(mode) {
+  cancelCountdown();
   state.capture = mode;
   prefs.set('capture', mode);
   syncCapture();
@@ -1870,7 +2039,7 @@ function screenToSource(x, y) {
 /* ---------- Camera ---------- */
 // `quiet` restarts (switching lens, unlocking focus) keep the last frame on screen.
 async function startCamera({ quiet = false, retried = false, keepRecording = false } = {}) {
-  stopCamera({ keepRecording });
+  stopCamera({ keepRecording, keepTimer: quiet });
   if (!quiet) {
     resetFocus();
     setZoomTarget(state.zoomTarget);
@@ -1916,9 +2085,10 @@ async function startCamera({ quiet = false, retried = false, keepRecording = fal
   syncHud();
 }
 
-// A lens change while recording keeps the take (and the microphone) going.
-function stopCamera({ keepRecording = false } = {}) {
+// A lens change while recording keeps the take (and the microphone) going; a quiet restart keeps a self-timer counting.
+function stopCamera({ keepRecording = false, keepTimer = false } = {}) {
   if (!keepRecording) stopRecording();
+  if (!keepTimer) cancelCountdown();
   loopToken++;
   if (stream) { stream.getTracks().forEach((t) => t.stop()); stream = null; }
   if (!keepRecording) releaseMic();
@@ -2158,8 +2328,8 @@ if (window.claude && typeof window.claude.use === 'function') {
   window.claude.use('downloads').then((d) => { downloadsApi = d; }).catch(() => {});
 }
 
-function canShareFiles(file) {
-  try { return !!(navigator.canShare && navigator.canShare({ files: [file] })); } catch { return false; }
+function canShareFiles(files) {
+  try { return !!(navigator.canShare && navigator.canShare({ files: [].concat(files) })); } catch { return false; }
 }
 
 async function saveToDevice(file) {
@@ -2232,7 +2402,7 @@ function syncHud() {
   $('frameVal').textContent = state.frame;
   $('hudFc').setAttribute('aria-pressed', String(state.falseColor));
   $('irisVal').textContent = ADJ.iris.format(state.iris);
-  syncHdr();
+  syncHdr(); syncTimer();
   $('hudIris').querySelector('small').textContent = state.iris === 'lens' ? 'Iris' : 'Iris sim';
 }
 
@@ -2320,7 +2490,7 @@ $('hudFc').addEventListener('click', () => {
 });
 // Tapping the viewfinder focuses and meters at that spot; with a panel open it just closes it.
 $('view').addEventListener('click', (e) => {
-  if (e.target.closest('.adjust, .lenses, .lock-badge, .notice, .hdr-btn')) return;
+  if (e.target.closest('.adjust, .lenses, .lock-badge, .notice, .view-tools')) return;
   if (adjusting) { closeAdjust(); return; }
   if (!$('colourPanel').hidden) { closeColourPanel(); return; }
   if (state.mode !== 'live' && state.mode !== 'still') return;
@@ -2368,7 +2538,13 @@ for (const [id, key] of [['cpSwatches', 'oneHue'], ['cpRange', 'oneRange']]) {
 
 /* Shutter */
 let busy = false;
-$('shutter').addEventListener('click', async () => {
+$('shutter').addEventListener('click', () => {
+  if (cancelCountdown()) { toast('Timer cancelled'); return; }
+  if (state.timer && state.mode === 'live' && !recording && !busy && geo) { startCountdown(); return; }
+  shoot();
+});
+
+async function shoot() {
   if (busy) return;
   if (state.mode === 'nocam') return $('pickCamera').click();
   if (state.mode !== 'live' && state.mode !== 'still') return;
@@ -2400,6 +2576,59 @@ $('shutter').addEventListener('click', async () => {
     busy = false;
     $('shutter').disabled = false;
   }
+}
+
+/* Self-timer: Off, 3 s, 10 s. A countdown runs on the viewfinder; tapping the shutter cancels it. */
+const TIMERS = [0, 3, 10];
+let countdown = 0; // interval id while counting down
+function syncTimer() {
+  const b = $('timerBtn');
+  b.dataset.on = String(state.timer > 0);
+  $('timerText').textContent = state.timer ? state.timer + 's' : 'OFF';
+  b.setAttribute('aria-label', state.timer ? 'Timer ' + state.timer + ' seconds' : 'Timer off');
+}
+$('timerBtn').addEventListener('click', () => {
+  state.timer = TIMERS[(TIMERS.indexOf(state.timer) + 1) % TIMERS.length];
+  prefs.set('timer', state.timer);
+  syncTimer();
+  toast(state.timer ? 'Timer ' + state.timer + ' seconds' : 'Timer off');
+});
+function startCountdown() {
+  closeAdjust(); closeColourPanel();
+  let left = state.timer;
+  const tick = () => {
+    if (!left) { cancelCountdown(); shoot(); return; }
+    const n = document.createElement('span');
+    n.textContent = left--;
+    $('countdown').replaceChildren(n);
+  };
+  $('countdown').hidden = false;
+  $('app').dataset.counting = 'true';
+  countdown = setInterval(tick, 1000);
+  tick();
+  syncCapture();
+}
+function cancelCountdown() {
+  if (!countdown) return false;
+  clearInterval(countdown);
+  countdown = 0;
+  $('countdown').hidden = true;
+  $('countdown').textContent = '';
+  $('app').dataset.counting = 'false';
+  syncCapture();
+  return true;
+}
+
+// Bluetooth keyboards and camera remotes work the shutter with Enter or Space. Volume keys count too where a
+// browser passes them on; iPhone keeps its volume buttons (and remotes that send volume up) to itself.
+const SHUTTER_KEYS = new Set(['AudioVolumeDown', 'AudioVolumeUp', 'VolumeDown', 'VolumeUp', 'Enter', ' ']);
+document.addEventListener('keydown', (e) => {
+  if (!SHUTTER_KEYS.has(e.key) || e.repeat || e.metaKey || e.ctrlKey || e.altKey) return;
+  if (!$('gallery').hidden || !$('scrim').hidden) return;
+  // Enter and Space keep their usual job on a focused button or field.
+  if ((e.key === 'Enter' || e.key === ' ') && e.target instanceof Element && e.target.closest('button, input, select, textarea, a, [tabindex]')) return;
+  e.preventDefault();
+  $('shutter').click();
 });
 
 $('modes').addEventListener('click', (e) => {
@@ -2572,11 +2801,10 @@ function renderGrid() {
     p.className = 'g-empty';
     p.textContent = 'Photos and videos you shoot appear here. They stay on this iPhone until you delete them.';
     grid.appendChild(p);
-    return;
   }
   for (const rec of shots) {
     const b = document.createElement('button');
-    b.setAttribute('aria-label', 'Open ' + rec.name + (rec.kind === 'video' ? ', video' : ''));
+    b.setAttribute('aria-label', (selecting ? '' : 'Open ') + rec.name + (rec.kind === 'video' ? ', video' : ''));
     const img = document.createElement('img');
     img.src = rec.thumbUrl; img.alt = '';
     b.appendChild(img);
@@ -2586,21 +2814,105 @@ function renderGrid() {
       d.textContent = formatDuration(rec.duration);
       b.appendChild(d);
     }
-    b.addEventListener('click', () => openViewer(rec));
+    b.dataset.id = rec.id;
+    b.addEventListener('click', () => { if (selecting) toggleSelected(rec); else openViewer(rec); });
     grid.appendChild(b);
   }
+  syncSelection();
 }
-$('rollBtn').addEventListener('click', () => { closeAdjust(); renderGrid(); $('gallery').hidden = false; });
-$('galleryClose').addEventListener('click', () => { $('gallery').hidden = true; });
+$('rollBtn').addEventListener('click', () => { closeAdjust(); cancelCountdown(); renderGrid(); $('gallery').hidden = false; });
+$('galleryClose').addEventListener('click', () => { setSelecting(false); $('gallery').hidden = true; });
 
-async function openViewer(rec) {
+/* Selecting several shots to save or delete at once */
+let selecting = false;
+const selected = new Map(); // shot id -> its File, loaded ahead so sharing can start right from the tap
+function setSelecting(on) {
+  selecting = on;
+  selected.clear();
+  $('gallery').classList.toggle('selecting', on);
+  $('gallerySelect').textContent = on ? 'Cancel' : 'Select';
+  $('galleryClose').hidden = on;
+  $('galleryConfirm').hidden = true;
+  renderGrid();
+}
+function syncSelection() {
+  const n = selected.size, all = n > 0 && n === shots.length;
+  if (selecting) $('galleryCount').textContent = n ? n + ' selected' : 'Tap clips to select';
+  $('gallerySelect').hidden = !shots.length && !selecting;
+  $('gallerySelectAll').hidden = !selecting;
+  $('gallerySelectAll').textContent = all ? 'Deselect all' : 'Select all';
+  $('galleryBar').hidden = !selecting || !$('galleryConfirm').hidden;
+  $('selSave').disabled = !n || [...selected.values()].some((f) => f === null);
+  if (!n) $('selNote').hidden = true;
+  $('selDelete').disabled = !n;
+  for (const b of $('galleryGrid').querySelectorAll('button[data-id]')) {
+    if (selecting) b.setAttribute('aria-pressed', String(selected.has(b.dataset.id))); else b.removeAttribute('aria-pressed');
+  }
+}
+function select(rec) {
+  if (selected.has(rec.id)) return;
+  selected.set(rec.id, null);
+  shotFile(rec).then((f) => { if (selected.has(rec.id)) { selected.set(rec.id, f || false); syncSelection(); } });
+}
+function toggleSelected(rec) {
+  if (selected.has(rec.id)) selected.delete(rec.id); else select(rec);
+  syncSelection();
+}
+$('gallerySelect').addEventListener('click', () => setSelecting(!selecting));
+$('gallerySelectAll').addEventListener('click', () => {
+  if (selected.size === shots.length) selected.clear(); else for (const rec of shots) select(rec);
+  syncSelection();
+});
+function selNote(text) { $('selNote').textContent = text; $('selNote').hidden = !text; }
+$('selSave').addEventListener('click', () => {
+  const files = [...selected.values()].filter(Boolean);
+  selNote(files.length < selected.size ? 'Some clips are missing and were left out.' : '');
+  if (!files.length) return;
+  // The share sheet must open straight from the tap, so the files are already loaded.
+  if (!downloadsApi && canShareFiles(files)) {
+    navigator.share({ files }).catch((e) => { if (e && e.name !== 'AbortError') selNote('Sharing failed. Try saving fewer at a time.'); });
+    return;
+  }
+  if (!downloadsApi && /iPhone|iPad|iPod/.test(navigator.userAgent)) { selNote('This browser can’t save these together. Open each one to save it.'); return; }
+  (async () => { for (const f of files) await saveToDevice(f); })();
+});
+$('selDelete').addEventListener('click', () => {
+  const n = selected.size;
+  $('selConfirmText').textContent = 'Delete ' + (n === 1 ? 'this clip' : n + ' clips') + ' from Are.Es Cam? Copies you saved to Photos stay.';
+  $('galleryBar').hidden = true;
+  $('galleryConfirm').hidden = false;
+});
+$('selKeep').addEventListener('click', () => { $('galleryConfirm').hidden = true; syncSelection(); });
+$('selDeleteYes').addEventListener('click', async () => {
+  const doomed = shots.filter((s) => selected.has(s.id));
+  for (const rec of doomed) await deleteShot(rec);
+  setSelecting(false);
+  updateRoll();
+});
+
+async function deleteShot(rec) {
+  try { await idb.del('images', rec.id); await idb.del('sources', rec.id); await idb.del('shots', rec.id); } catch {}
+  memImages.delete(rec.id);
+  memSources.delete(rec.id);
+  URL.revokeObjectURL(rec.thumbUrl);
+  shots = shots.filter((s) => s.id !== rec.id);
+  if (state.editing === rec) leaveStill();
+}
+
+async function shotFile(rec) {
   const isVideo = rec.kind === 'video', type = isVideo ? rec.mime || 'video/mp4' : 'image/jpeg';
   const blob = await shotBlob(rec.id, type);
-  if (!blob) { toast('This clip is missing.'); return; }
-  closeViewer();
+  if (!blob) return null;
   const ext = type === 'video/webm' ? '.webm' : isVideo ? '.mp4' : '.jpg';
-  const file = new File([blob], rec.name + ext, { type });
-  viewing = { rec, file, url: URL.createObjectURL(blob) };
+  return new File([blob], rec.name + ext, { type });
+}
+
+async function openViewer(rec) {
+  const isVideo = rec.kind === 'video';
+  const file = await shotFile(rec);
+  if (!file) { toast('This clip is missing.'); return; }
+  closeViewer();
+  viewing = { rec, file, url: URL.createObjectURL(file) };
   $('viewerImg').hidden = isVideo;
   $('viewerVideo').hidden = !isVideo;
   if (isVideo) $('viewerVideo').src = viewing.url; else $('viewerImg').src = viewing.url;
@@ -2642,13 +2954,9 @@ $('viewerKeep').addEventListener('click', () => { $('viewerActions').hidden = fa
 $('viewerDeleteYes').addEventListener('click', async () => {
   if (!viewing) return;
   const { rec } = viewing;
-  try { await idb.del('images', rec.id); await idb.del('sources', rec.id); await idb.del('shots', rec.id); } catch {}
-  memImages.delete(rec.id);
-  memSources.delete(rec.id);
-  URL.revokeObjectURL(rec.thumbUrl);
-  shots = shots.filter((s) => s.id !== rec.id);
-  closeViewer(); updateRoll(); renderGrid();
-  if (state.editing === rec) leaveStill();
+  closeViewer();
+  await deleteShot(rec);
+  updateRoll(); renderGrid();
 });
 
 /* Lifecycle */
