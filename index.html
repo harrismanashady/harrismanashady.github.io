@@ -25,6 +25,7 @@
   --rec: #ee2b2f;
   --rec-soft: rgba(238, 43, 47, 0.16);
   --af: #ffd84a;
+  --ai: #63e2a6;
   --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
   --sans: -apple-system, BlinkMacSystemFont, system-ui, "Helvetica Neue", Arial, sans-serif;
   color-scheme: dark;
@@ -64,7 +65,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--rec); outli
 [data-mode="still"] .tally i { background: #ffd84a; }
 
 /* Viewfinder */
-.view { grid-area: view; position: relative; display: flex; align-items: center; justify-content: center; overflow: hidden; background: #000; }
+.view { grid-area: view; position: relative; display: flex; align-items: center; justify-content: center; overflow: hidden; background: #000; touch-action: none; }
 #screen { position: absolute; left: 50%; top: 50%; display: block; background: #000; transform: translate(-50%, -50%) rotate(var(--vf-rot, 0deg)); }
 [data-mode="boot"] #screen, [data-mode="nocam"] #screen { visibility: hidden; }
 .cam-feed { position: absolute; width: 2px; height: 2px; opacity: 0; pointer-events: none; }
@@ -192,6 +193,9 @@ input[type="range"]::-moz-range-thumb { width: 18px; height: 18px; border-radius
 .lenses button span { display: inline-block; transform: rotate(var(--ui-rot, 0deg)); transition: transform 0.3s ease; }
 .lenses button[aria-checked="true"] { width: 42px; height: 42px; margin: -3px 0; color: var(--af); font-size: 13px; }
 .lenses button:disabled { opacity: 0.4; }
+.zoom-readout { position: absolute; left: 50%; bottom: 70px; transform: translateX(-50%); background: rgba(0, 0, 0, 0.62); color: var(--af); border-radius: 999px; padding: 4px 12px; font: 600 15px var(--mono); font-variant-numeric: tabular-nums; pointer-events: none; }
+.ai-tag { position: absolute; left: max(12px, env(safe-area-inset-left, 0px)); bottom: 16px; display: flex; align-items: center; gap: 6px; background: rgba(0, 0, 0, 0.62); border: 1px solid var(--ai); color: var(--ai); border-radius: 6px; padding: 3px 8px; font: 600 10px var(--mono); letter-spacing: 0.08em; pointer-events: none; }
+.ai-tag i { width: 6px; height: 6px; border-radius: 50%; background: var(--ai); }
 .rec-tc b { color: var(--rec); font-weight: 700; letter-spacing: 0.08em; }
 .icon-btn { width: 44px; height: 44px; border-radius: 50%; background: var(--panel); border: 1px solid var(--line); display: grid; place-items: center; }
 .icon-btn svg { width: 22px; height: 22px; }
@@ -317,7 +321,9 @@ legend { padding: 0; margin-bottom: 8px; font-weight: 600; }
       </div>
     </div>
     <div class="reticle" id="reticle" hidden><span id="reticleTag">AF</span></div>
-    <div class="lenses" id="lenses" role="radiogroup" aria-label="Lens" hidden></div>
+    <div class="lenses" id="lenses" role="radiogroup" aria-label="Zoom" hidden></div>
+    <div class="zoom-readout" id="zoomReadout" hidden>1×</div>
+    <div class="ai-tag" id="aiTag" hidden><i></i>AI · SKIN</div>
     <button class="lock-badge" id="lockBadge" hidden aria-label="Unlock focus"><span id="lockText">AF LOCK</span><b aria-hidden="true">×</b></button>
     <div class="rec-tc" id="recTc" hidden><i></i><b>REC</b><span id="recTime">00:00:00:00</span></div>
     <div class="toast hide" id="toast" role="status" aria-live="polite"></div>
@@ -370,6 +376,7 @@ legend { padding: 0; margin-bottom: 8px; font-weight: 600; }
       <button role="radio" data-v="0">Off</button><button role="radio" data-v="0.45">Fine</button><button role="radio" data-v="0.75">Medium</button><button role="radio" data-v="1.1">Heavy</button>
     </div>
   </div>
+  <div class="row"><span id="skinLabel">AI skin tone<small class="fine" id="skinNote">Finds people and keeps their skin natural and clear in every look.</small></span><button class="switch" id="skinSwitch" role="switch" aria-labelledby="skinLabel" aria-checked="true"></button></div>
   <div class="row"><span id="afSpeedLabel">Focus transition<small class="fine">How fast focus moves to a spot you tap.</small></span>
     <div class="seg" id="afSpeedSeg" role="radiogroup" aria-labelledby="afSpeedLabel">
       <button role="radio" data-v="slow">Slow</button><button role="radio" data-v="medium">Medium</button><button role="radio" data-v="fast">Fast</button>
@@ -457,18 +464,19 @@ const ROLLOFFS = [
   { id: 'hard', label: 'Hard', k: 0.5 }, { id: 'medium', label: 'Medium', k: 0.75 }, { id: 'soft', label: 'Soft', k: 1 }, { id: 'vsoft', label: 'Very Soft', k: 1.6 },
 ];
 // iPhone 14 Pro / Pro Max lenses: 35 mm equivalent focal length and their fixed apertures.
-// `blur` scales the simulated depth of field (longer lenses blur more).
+// `zoom` is the field of view relative to the main lens; `blur` scales the simulated depth of field.
 const LENSES = {
-  ultra: { label: '.5', mm: 13, fnum: 2.2, blur: 0.45 },
-  wide: { label: '1', mm: 24, fnum: 1.78, blur: 1 },
-  wide2: { label: '2', mm: 48, fnum: 1.78, blur: 1.35, crop: 2 }, // a 2x crop of the main lens, as on iPhone
-  tele: { label: '3', mm: 77, fnum: 2.8, blur: 1.7 },
-  front: { label: '', mm: 23, fnum: 1.9, blur: 0.9 },
+  ultra: { mm: 13, fnum: 2.2, blur: 0.45, zoom: 13 / 24 },
+  wide: { mm: 24, fnum: 1.78, blur: 1, zoom: 1 },
+  tele: { mm: 77, fnum: 2.8, blur: 1.7, zoom: 77 / 24 },
+  front: { mm: 23, fnum: 1.9, blur: 0.9, zoom: 1 },
 };
+// Zoom buttons, like the iPhone camera's; 2 is a crop of the main lens.
+const ZOOM_PRESETS = [{ lens: 'ultra', label: '.5', zoom: LENSES.ultra.zoom }, { lens: 'wide', label: '1', zoom: 1 }, { lens: 'wide', label: '2', zoom: 2 }, { lens: 'tele', label: '3', zoom: LENSES.tele.zoom }];
 // Simulated iris. 'lens' leaves the lens as it is; an f-stop adds depth-of-field blur.
 const IRIS = [1.4, 2, 2.8, 4, 5.6, 8, 'lens'];
 // Settings a shot remembers so it can be re-graded later, like a RAW clip.
-const GRADE_KEYS = ['look', 'iso', 'kelvin', 'frame', 'grain', 'vignette', 'contrast', 'rolloff', 'iris', 'focusPt', 'oneHue', 'oneRange'];
+const GRADE_KEYS = ['look', 'iso', 'kelvin', 'frame', 'grain', 'vignette', 'contrast', 'rolloff', 'iris', 'focusPt', 'oneHue', 'oneRange', 'skin'];
 
 const state = {
   mode: 'boot',            // boot | live | still | nocam
@@ -485,7 +493,10 @@ const state = {
   capture: prefs.get('capture', 'photo'), // photo | video
   autoRotate: prefs.get('autoRotate', true),
   videoTurn: 0,            // clockwise degrees the video is turned to come out upright
-  lens: prefs.get('lens', 'wide'),
+  zoom: 1,                 // current zoom, relative to the main lens; eases toward zoomTarget
+  zoomTarget: 1,
+  physLens: 'wide',        // the back camera to open: ultra | wide | tele
+  skin: prefs.get('skin', true), // AI: keep people's skin natural
   iris: prefs.get('iris', 'lens'),
   focusPt: [0.5, 0.5],     // focus point in the source frame (0..1), also the center of the simulated depth of field
   focusPrev: [0.5, 0.5],   // the previous focus point while the simulated depth of field racks to the new one
@@ -699,7 +710,9 @@ in vec2 aPos;
 uniform vec4 uCrop;
 uniform vec2 uFlip;   // x: mirror the frame, y: flip rows for readPixels
 uniform int uTurn;    // quarter turns clockwise applied to the frame
+uniform vec4 uSnapCrop; // crop of the held frame from the previous lens
 out vec2 vSrc;
+out vec2 vSnap;
 out vec2 vFrame;
 void main() {
   vec2 t = aPos * 0.5 + 0.5;
@@ -711,6 +724,7 @@ void main() {
   else if (uTurn == 3) s = vec2(1.0 - o.y, o.x);
   if (uFlip.x > 0.5) s.x = 1.0 - s.x;
   vSrc = uCrop.xy + s * uCrop.zw;
+  vSnap = uSnapCrop.xy + s * uSnapCrop.zw;
   gl_Position = vec4(aPos, 0.0, 1.0);
 }`;
 
@@ -718,8 +732,16 @@ const FS = `#version 300 es
 precision highp float;
 precision highp sampler3D;
 in vec2 vSrc;
+in vec2 vSnap;
 in vec2 vFrame;
 uniform sampler2D uImage;
+uniform sampler2D uSnap;     // last frame of the previous lens, cross-faded out after a lens change
+uniform float uSnapMix;
+uniform sampler2D uMask;     // AI skin mask for the region uMaskCrop of the frame
+uniform vec4 uMaskCrop;
+uniform float uSkin;
+uniform sampler3D uSkinLut;  // natural rendering used for skin
+uniform float uSkinLutSize;
 uniform sampler3D uLut;
 uniform float uLutSize;
 uniform vec3 uLutMin;
@@ -767,8 +789,7 @@ float hash(vec2 p) {
   return fract((p3.x + p3.y) * p3.z);
 }
 
-vec3 fetchLin(vec2 uv, float lod) {
-  vec3 lin = srgbToLin(textureLod(uImage, uv, lod).rgb);
+vec3 restoreHighlights(vec3 lin) {
   if (uExpandA > 0.0) {
     float m = max(max(lin.r, lin.g), lin.b);
     float me = m * (1.0 - uExpandA * 0.18) / (1.0 - uExpandA * min(m, 0.999));
@@ -776,6 +797,7 @@ vec3 fetchLin(vec2 uv, float lod) {
   }
   return lin;
 }
+vec3 fetchLin(vec2 uv, float lod) { return restoreHighlights(srgbToLin(textureLod(uImage, uv, lod).rgb)); }
 
 void main() {
   // Simulated depth of field: a disc blur that grows with distance from the focus point.
@@ -801,6 +823,7 @@ void main() {
   } else {
     lin = fetchLin(vSrc, 0.0);
   }
+  if (uSnapMix > 0.0) lin = mix(lin, restoreHighlights(srgbToLin(texture(uSnap, vSnap).rgb)), uSnapMix);
   lin *= uWB * uExposure;
   vec3 enc;
   if (uInput > 1.5) {
@@ -815,6 +838,19 @@ void main() {
   enc = clamp((enc - uLutMin) / (uLutMax - uLutMin), 0.0, 1.0);
   vec3 o = texture(uLut, enc * ((uLutSize - 1.0) / uLutSize) + 0.5 / uLutSize).rgb;
 
+  // People: where the AI found skin, use the natural rendering, a touch brighter and with less grain.
+  float skin = 0.0;
+  if (uSkin > 0.5) {
+    skin = texture(uMask, (vSrc - uMaskCrop.xy) / uMaskCrop.zw).r;
+    if (skin > 0.003) {
+      vec3 w = M709toRWG * lin;
+      vec3 e = clamp(vec3(log3g10(w.r), log3g10(w.g), log3g10(w.b)), 0.0, 1.0);
+      vec3 natural = texture(uSkinLut, e * ((uSkinLutSize - 1.0) / uSkinLutSize) + 0.5 / uSkinLutSize).rgb;
+      natural += (1.0 - natural) * 0.06;
+      o = mix(o, natural, skin);
+    }
+  }
+
   vec2 q = (vFrame - 0.5) * vec2(uAspect, 1.0);
   float r = length(q) / length(vec2(uAspect, 1.0) * 0.5);
   o *= 1.0 - uVignette * 0.32 * pow(r, 2.4);
@@ -823,7 +859,7 @@ void main() {
     vec2 cell = floor(vFrame * vec2(1500.0 * uAspect, 1500.0));
     float n = hash(cell + uSeed) + hash(cell * 1.37 + uSeed * 1.71) - 1.0;
     float y = dot(o, vec3(0.2126, 0.7152, 0.0722));
-    o += n * uGrain * 0.055 * (0.35 + 2.6 * y * (1.0 - y));
+    o += n * uGrain * 0.055 * (0.35 + 2.6 * y * (1.0 - y)) * (1.0 - 0.6 * skin);
   }
 
   if (uFalseColor > 0.5) {
@@ -855,7 +891,7 @@ function initGL() {
   if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
   GL.prog = prog;
   GL.u = {};
-  for (const name of ['uCrop', 'uFlip', 'uTurn', 'uImage', 'uLut', 'uLutSize', 'uLutMin', 'uLutMax', 'uInput', 'uExpandA', 'uExposure', 'uWB', 'uGrain', 'uSeed', 'uAspect', 'uVignette', 'uFalseColor', 'uFocusPt', 'uFocusPrev', 'uFocusMix', 'uTexSize', 'uCropShortPx', 'uBlurPx']) {
+  for (const name of ['uCrop', 'uFlip', 'uTurn', 'uImage', 'uLut', 'uLutSize', 'uLutMin', 'uLutMax', 'uInput', 'uExpandA', 'uExposure', 'uWB', 'uGrain', 'uSeed', 'uAspect', 'uVignette', 'uFalseColor', 'uFocusPt', 'uFocusPrev', 'uFocusMix', 'uTexSize', 'uCropShortPx', 'uBlurPx', 'uSnap', 'uSnapCrop', 'uSnapMix', 'uMask', 'uMaskCrop', 'uSkin', 'uSkinLut', 'uSkinLutSize']) {
     GL.u[name] = gl.getUniformLocation(prog, name);
   }
   GL.vao = gl.createVertexArray();
@@ -870,6 +906,14 @@ function initGL() {
   GL.frameTex = gl.createTexture();
   gl.bindTexture(gl.TEXTURE_2D, GL.frameTex);
   for (const [k, v] of [[gl.TEXTURE_MIN_FILTER, gl.LINEAR], [gl.TEXTURE_MAG_FILTER, gl.LINEAR], [gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE], [gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE]]) gl.texParameteri(gl.TEXTURE_2D, k, v);
+  // The held frame for lens cross-fades, and the AI skin mask (one channel).
+  for (const name of ['snapTex', 'maskTex']) {
+    GL[name] = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, GL[name]);
+    for (const [k, v] of [[gl.TEXTURE_MIN_FILTER, gl.LINEAR], [gl.TEXTURE_MAG_FILTER, gl.LINEAR], [gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE], [gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE]]) gl.texParameteri(gl.TEXTURE_2D, k, v);
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, 1, 1, 0, gl.RED, gl.UNSIGNED_BYTE, new Uint8Array([0]));
+  }
   GL.maxTex = Math.min(gl.getParameter(gl.MAX_TEXTURE_SIZE), gl.getParameter(gl.MAX_RENDERBUFFER_SIZE));
   return true;
 }
@@ -894,7 +938,11 @@ function activeLut() {
     }
     return lutCache.get('custom');
   }
-  const look = LOOKS.find((l) => l.id === state.look) || LOOKS[0];
+  return bakedLut(LOOKS.find((l) => l.id === state.look) || LOOKS[0]);
+}
+
+// A built-in look's LUT for the current contrast and roll-off (and One Colour choice), baked once.
+function bakedLut(look) {
   const one = look.id === 'one';
   const key = `${look.id}|${state.contrast}|${state.rolloff}` + (one ? `|${state.oneHue}|${state.oneRange}` : '');
   let lut = lutCache.get(look.id);
@@ -924,8 +972,9 @@ function geometryFor(sw, sh, zoom = 1) {
   let target = frame.ratio ? (sw >= sh ? frame.ratio : 1 / frame.ratio) : sw / sh;
   let cw = sw, ch = sh;
   if (sw / sh > target) cw = sh * target; else ch = sw / target;
+  const frameW = Math.round(cw), frameH = Math.round(ch); // the frame before zoom: sizes the view and recordings
   cw = Math.round(cw / zoom); ch = Math.round(ch / zoom);
-  return { crop: [(sw - cw) / 2 / sw, (sh - ch) / 2 / sh, cw / sw, ch / sh], outW: cw, outH: ch, aspect: cw / ch, srcW: sw, srcH: sh };
+  return { crop: [(sw - cw) / 2 / sw, (sh - ch) / 2 / sh, cw / sw, ch / sh], outW: cw, outH: ch, frameW, frameH, aspect: frameW / frameH, srcW: sw, srcH: sh };
 }
 
 function computeGeometry() {
@@ -934,7 +983,7 @@ function computeGeometry() {
 }
 
 function layout() {
-  if (!recording) computeGeometry(); // the frame is locked while a clip records
+  computeGeometry();
   if (!geo) return;
   $('reticle').hidden = true; // its screen position no longer matches the picture
   const view = $('view'), vw = view.clientWidth, vh = view.clientHeight;
@@ -953,12 +1002,13 @@ function layout() {
     [pw, ph] = recordingSize();
   } else {
     const dpr = Math.min(window.devicePixelRatio || 1, 3);
-    pw = Math.max(1, Math.min(Math.round(w * dpr), geo.outW));
+    pw = Math.max(1, Math.min(Math.round(w * dpr), geo.frameW));
     ph = Math.max(1, Math.round(pw / geo.aspect));
   }
-  // Assigning a size clears the canvas, even when it is unchanged.
-  if (canvas.width !== pw) canvas.width = pw;
-  if (canvas.height !== ph) canvas.height = ph;
+  // Assigning a size clears the canvas, even when it is unchanged. A recording keeps its size,
+  // even across a lens change.
+  if (!recording && canvas.width !== pw) canvas.width = pw;
+  if (!recording && canvas.height !== ph) canvas.height = ph;
   requestRender();
 }
 
@@ -979,9 +1029,9 @@ function irisBlurPx(geom) {
   return strength * 0.028 * Math.min(geom.crop[2] * geom.srcW, geom.crop[3] * geom.srcH) * lensSpec().blur;
 }
 
-function draw(w, h, { capture = false, mirror = false, turn = 0, geom = geo, focus = state.focusPt, seed = Math.random() * 500 } = {}) {
+function draw(w, h, { capture = false, mirror = false, turn = 0, geom = geo, focus = state.focusPt, snapMix = 0, snapCrop = null, seed = Math.random() * 500 } = {}) {
   const racking = !capture && focus === state.focusPt; // photos are saved fully focused on the target
-  const lut = activeLut(), u = GL.u;
+  const lut = activeLut(), u = GL.u, skinOn = skinReady(), skin = skinOn ? bakedLut(LOOKS[0]) : null;
   gl.viewport(0, 0, w, h);
   gl.useProgram(GL.prog);
   gl.bindVertexArray(GL.vao);
@@ -1008,8 +1058,22 @@ function draw(w, h, { capture = false, mirror = false, turn = 0, geom = geo, foc
   gl.uniform2f(u.uTexSize, geom.srcW, geom.srcH);
   gl.uniform1f(u.uCropShortPx, Math.min(geom.crop[2] * geom.srcW, geom.crop[3] * geom.srcH));
   gl.uniform1f(u.uBlurPx, irisBlurPx(geom));
+  gl.uniform1i(u.uSnap, 4);
+  gl.uniform4fv(u.uSnapCrop, snapCrop || geom.crop);
+  gl.uniform1f(u.uSnapMix, snapMix);
+  gl.uniform1i(u.uMask, 2);
+  gl.uniform1i(u.uSkinLut, 3);
+  gl.uniform1f(u.uSkin, skinOn ? 1 : 0);
+  gl.uniform4fv(u.uMaskCrop, maskCrop);
+  gl.uniform1f(u.uSkinLutSize, skin ? skin.size : 2);
   gl.activeTexture(gl.TEXTURE1);
   gl.bindTexture(gl.TEXTURE_3D, lut.tex);
+  gl.activeTexture(gl.TEXTURE2);
+  gl.bindTexture(gl.TEXTURE_2D, GL.maskTex);
+  gl.activeTexture(gl.TEXTURE3);
+  gl.bindTexture(gl.TEXTURE_3D, skin ? skin.tex : null);
+  gl.activeTexture(gl.TEXTURE4);
+  gl.bindTexture(gl.TEXTURE_2D, GL.snapTex);
   gl.activeTexture(gl.TEXTURE0);
   gl.bindTexture(gl.TEXTURE_2D, GL.frameTex);
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
@@ -1021,7 +1085,12 @@ function requestRender() {
   renderQueued = true;
   requestAnimationFrame(() => {
     renderQueued = false;
-    if (state.mode === 'still' && geo) { gl.bindFramebuffer(gl.FRAMEBUFFER, null); draw(canvas.width, canvas.height, { seed: 7 }); }
+    if (state.mode === 'still' && geo) {
+      const sig = stillGen + '|' + geo.crop.join();
+      if (state.skin && segmenter && sig !== maskSig) { segmentSkin(stillCanvas, geo, false); maskSig = sig; syncAiTag(); }
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      draw(canvas.width, canvas.height, { seed: 7 });
+    }
     if (focusAnim) requestRender(); // keep drawing while the focus racks
   });
 }
@@ -1040,9 +1109,13 @@ function startLoop() {
         layout();
         orientationChanged();
       }
+      stepZoom();
+      if (token !== loopToken) return; // the zoom just changed lens
       uploadSource(video);
+      segmentLive();
+      const fade = snapFade();
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-      draw(canvas.width, canvas.height, { mirror: state.facing === 'user', turn: state.capture === 'video' ? state.videoTurn : 0 });
+      draw(canvas.width, canvas.height, { mirror: state.facing === 'user', turn: state.capture === 'video' ? state.videoTurn : 0, snapMix: fade, snapCrop: fade ? snapGeom().crop : null });
       if (wantRecThumb) { wantRecThumb = false; recThumb = snapshotThumb(); }
     }
     next();
@@ -1083,8 +1156,10 @@ const toJpeg = (c, quality) => new Promise((res, rej) => c.toBlob((b) => (b ? re
 async function renderPhoto(focus) {
   const g = geometryFor(stillCanvas.width, stillCanvas.height);
   let w = g.outW, h = g.outH;
-  const cap = Math.min(GL.maxTex, 4096);
+  const cap = Math.min(GL.maxTex, 4096), floor = 1920; // zoomed shots are scaled up to at least HD
   if (Math.max(w, h) > cap) { const s = cap / Math.max(w, h); w = Math.round(w * s); h = Math.round(h * s); }
+  if (Math.max(w, h) < floor) { const s = floor / Math.max(w, h); w = Math.round(w * s); h = Math.round(h * s); }
+  if (state.skin && segmenter) segmentSkin(stillCanvas, g, false); // a fresh mask for exactly this frame
   const tex = gl.createTexture();
   gl.bindTexture(gl.TEXTURE_2D, tex);
   gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
@@ -1121,9 +1196,9 @@ let recThumb = null, wantRecThumb = false, recNote = '', recSize = [0, 0];
 let micStream = null;
 
 function recordingSize() {
-  const s = Math.min(1, REC_LONG_SIDE / Math.max(geo.outW, geo.outH));
+  const s = Math.min(1, REC_LONG_SIDE / Math.max(geo.frameW, geo.frameH));
   const even = (v) => Math.max(2, Math.round((v * s) / 2) * 2); // video encoders need even sizes
-  const w = even(geo.outW), h = even(geo.outH);
+  const w = even(geo.frameW), h = even(geo.frameH);
   return state.videoTurn % 180 ? [h, w] : [w, h];
 }
 
@@ -1311,18 +1386,95 @@ function orientationChanged() {
   lastOutput = out;
 }
 
-/* ---------- Lenses ----------
-   Since iOS 16.3 each back camera is listed separately. The labels are localized, so
-   unrecognized ones fall back to letting iOS choose. */
-let lensIds = prefs.get('lensIds', {}); // lens type -> deviceId
+/* ---------- Lenses and zoom ----------
+   Since iOS 16.3 each back camera is listed separately; the labels are localized, so
+   unrecognized ones fall back to letting iOS choose. Zoom is continuous: each lens is cropped
+   digitally up to the next lens, and when zoom crosses over, the last frame is held while the
+   other lens starts and then cross-faded into it at the same field of view. */
+let lensIds = prefs.get('lensIds', {}); // physical lens type -> deviceId
 let lensesDetected = false;
 let camConstraints = {};
+let streamLens = 'wide'; // the lens the current stream comes from
+let lensSwitch = null;   // {phase: 'waiting' | 'fading', frames, t0} while changing lens
+let snap = null;         // the held frame: {srcW, srcH, base}
+const FADE_MS = 240;
 
-const lensAvailable = (key) => key === 'wide' || key === 'wide2' || !!lensIds[key];
-const currentLensKey = () => (state.facing === 'user' ? 'front' : lensAvailable(state.lens) ? state.lens : 'wide');
-const lensSpec = () => LENSES[currentLensKey()];
-const lensDevice = (key) => ((key === 'ultra' || key === 'tele') && lensIds[key] ? key : 'wide');
-const lensCrop = () => (state.mode === 'live' && currentLensKey() === 'wide2' ? LENSES.wide2.crop : 1);
+const lensSpec = () => LENSES[state.facing === 'user' ? 'front' : streamLens];
+const zoomRange = () => (state.facing === 'user' ? [1, 4] : [lensIds.ultra ? LENSES.ultra.zoom : 1, lensIds.tele ? 15 : 8]);
+const lensCrop = () => (state.mode === 'live' ? Math.max(1, state.zoom / lensSpec().zoom) : 1);
+const formatZoom = (z) => (z < 1 ? z.toFixed(1).replace(/^0/, '') : z < 10 ? z.toFixed(1).replace(/\.0$/, '') : String(Math.round(z)));
+
+// Which lens a zoom needs. Small overlaps keep a pinch that hovers at a switch point on one lens.
+function lensForZoom(z) {
+  const tele = lensIds.tele ? LENSES.tele.zoom : Infinity;
+  if (z >= tele || (streamLens === 'tele' && z >= tele * 0.985)) return 'tele';
+  if (lensIds.ultra && (z < 0.985 || (streamLens === 'ultra' && z < 1))) return 'ultra';
+  return 'wide';
+}
+
+function setZoomTarget(z) {
+  const [lo, hi] = zoomRange();
+  state.zoomTarget = Math.min(hi, Math.max(lo, z));
+}
+
+// Called every frame: ease the zoom toward its target and change lens when it crosses over.
+function stepZoom() {
+  const z = state.zoom, t = state.zoomTarget;
+  // Ease toward the target, at most 10% a frame, so a button press glides instead of jumping.
+  const step = Math.min(0.095, Math.max(-0.095, Math.log(t / z) * 0.3));
+  let next = Math.abs(Math.log(t / z)) < 0.003 ? t : z * Math.exp(step);
+  const canSwitch = !lensSwitch && state.mode === 'live' && state.facing === 'environment' && video.videoWidth;
+  const want = canSwitch ? lensForZoom(next) : streamLens;
+  // A lens (or the held frame) can't show a wider view than its own: hold there until the wider lens is on.
+  if (lensSwitch && snap) next = Math.max(next, snap.base);
+  else if (want !== streamLens) next = Math.max(next, lensSpec().zoom);
+  if (next !== z) { state.zoom = next; computeGeometry(); syncZoomUi(); }
+  if (want !== streamLens) changeLens(want);
+}
+
+async function changeLens(type) {
+  // Hold the current frame; it stays on screen while the new lens starts, then fades out.
+  gl.bindTexture(gl.TEXTURE_2D, GL.snapTex);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, video);
+  snap = { srcW: video.videoWidth, srcH: video.videoHeight, base: lensSpec().zoom };
+  lensSwitch = { phase: 'waiting', frames: 0, t0: performance.now() };
+  dropFocusLock();
+  state.physLens = type;
+  holdFrame();
+  await startCamera({ quiet: true, keepRecording: true });
+  if (!stream) { lensSwitch = null; snap = null; }
+  else toast(`${lensSpec().mm} mm · f/${lensSpec().fnum}`);
+  syncHud();
+}
+
+const snapGeom = () => geometryFor(snap.srcW, snap.srcH, Math.max(1, state.zoom / snap.base));
+
+// While the new lens starts, keep drawing the held frame (zooming still works on it).
+function holdFrame() {
+  const frame = () => {
+    if (!lensSwitch || lensSwitch.phase !== 'waiting') return;
+    stepZoom();
+    const g = snapGeom();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    draw(canvas.width, canvas.height, { mirror: state.facing === 'user', turn: state.capture === 'video' ? state.videoTurn : 0, geom: g, snapMix: 1, snapCrop: g.crop });
+    requestAnimationFrame(frame);
+  };
+  requestAnimationFrame(frame);
+}
+
+// Cross-fade amount for the frame being drawn, once the new lens is delivering frames.
+function snapFade() {
+  if (!lensSwitch) return 0;
+  if (lensSwitch.phase === 'waiting') {
+    // Let the new lens settle its exposure for a few frames before fading.
+    if (++lensSwitch.frames < 5) return 1;
+    lensSwitch.phase = 'fading';
+    lensSwitch.t0 = performance.now();
+  }
+  const t = (performance.now() - lensSwitch.t0) / FADE_MS;
+  if (t >= 1) { lensSwitch = null; snap = null; return 0; }
+  return 1 - t * t * (3 - 2 * t);
+}
 
 async function detectLenses() {
   if (lensesDetected) return false;
@@ -1347,35 +1499,148 @@ async function detectLenses() {
 }
 
 function buildLenses() {
-  const el = $('lenses'), current = currentLensKey();
-  const keys = state.mode === 'live' && state.facing === 'environment' ? ['ultra', 'wide', 'wide2', 'tele'].filter(lensAvailable) : [];
+  const el = $('lenses');
+  const presets = state.mode === 'live' && state.facing === 'environment' ? ZOOM_PRESETS.filter((p) => p.lens === 'wide' || lensIds[p.lens]) : [];
   el.textContent = '';
-  el.hidden = keys.length < 2;
-  for (const key of keys) {
+  el.hidden = presets.length < 2;
+  for (const p of presets) {
     const b = document.createElement('button'), s = document.createElement('span');
     b.setAttribute('role', 'radio');
-    b.setAttribute('aria-checked', String(key === current));
-    b.setAttribute('aria-label', LENSES[key].mm + ' mm lens');
-    b.dataset.lens = key;
-    b.disabled = recording;
-    s.textContent = LENSES[key].label + (key === current ? '×' : '');
+    b.setAttribute('aria-label', 'Zoom ' + p.label + '×');
+    b.dataset.zoom = p.zoom;
+    b.dataset.label = p.label;
     b.appendChild(s);
     el.appendChild(b);
   }
+  syncZoomUi();
+}
+
+// The active button is the longest one at or below the current zoom; it shows the exact zoom.
+let readoutTimer = 0;
+function syncZoomUi() {
+  const buttons = [...$('lenses').children];
+  let active = buttons[0];
+  for (const b of buttons) if (state.zoom >= +b.dataset.zoom * 0.985) active = b;
+  for (const b of buttons) {
+    const on = b === active, near = Math.abs(state.zoom / +b.dataset.zoom - 1) < 0.04;
+    const text = on ? (near ? b.dataset.label : formatZoom(state.zoom)) + '×' : b.dataset.label;
+    b.setAttribute('aria-checked', String(on));
+    if (b.firstChild.textContent !== text) b.firstChild.textContent = text;
+  }
+  const r = $('zoomReadout');
+  r.textContent = formatZoom(state.zoom) + '×';
+  if (pinch) { r.hidden = false; clearTimeout(readoutTimer); readoutTimer = setTimeout(() => { if (!pinch) r.hidden = true; }, 900); }
 }
 
 $('lenses').addEventListener('click', (e) => {
   const b = e.target.closest('button');
-  if (!b || b.disabled || recording || b.dataset.lens === currentLensKey()) return;
-  const before = lensDevice(state.lens);
-  state.lens = b.dataset.lens;
-  prefs.set('lens', state.lens);
-  resetFocus();
-  syncHud();
-  toast(`${lensSpec().mm} mm · f/${lensSpec().fnum}`);
-  if (lensDevice(state.lens) === before) { canvas.dataset.src = ''; buildLenses(); } // 1x and 2x share a lens
-  else startCamera({ quiet: true });
+  if (b) setZoomTarget(+b.dataset.zoom);
 });
+
+// Pinch to zoom on the viewfinder.
+let pinch = null, lastPinchEnd = 0;
+const touchGap = (t) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+$('view').addEventListener('touchstart', (e) => {
+  if (e.touches.length !== 2 || state.mode !== 'live') return;
+  e.preventDefault();
+  pinch = { gap: touchGap(e.touches), zoom: state.zoomTarget };
+  syncZoomUi();
+}, { passive: false });
+$('view').addEventListener('touchmove', (e) => {
+  if (!pinch || e.touches.length !== 2) return;
+  e.preventDefault();
+  setZoomTarget(pinch.zoom * (touchGap(e.touches) / pinch.gap));
+}, { passive: false });
+$('view').addEventListener('touchend', (e) => {
+  if (pinch && e.touches.length < 2) { pinch = null; lastPinchEnd = performance.now(); syncZoomUi(); }
+});
+document.addEventListener('gesturestart', (e) => e.preventDefault()); // Safari's own page zoom
+
+/* ---------- People: AI skin tone ----------
+   MediaPipe's multiclass selfie segmenter runs on the phone and labels face and body skin
+   separately from hair, clothes and background. Where it finds skin, the shader uses a natural
+   rendering instead of the look, so people keep true skin tones in every look. */
+const AI_DIR = 'vendor/mediapipe-0.10.35';
+const AI_MODEL = 'vendor/models/selfie_multiclass_256x256.tflite';
+let segmenter = null, aiStatus = 'off'; // off | loading | ready | failed
+let skinClasses = [2, 3], skinCover = 0, segSkip = 0, segClock = 0, maskSig = '', maskCrop = [0, 0, 1, 1];
+let maskVals = null, maskBytes = null, maskReady = false;
+const segCanvas = document.createElement('canvas');
+const segCtx = segCanvas.getContext('2d');
+
+const skinReady = () => state.skin && !!segmenter && maskReady;
+
+async function loadSkinAI() {
+  if (segmenter || aiStatus === 'loading') return;
+  aiStatus = 'loading';
+  syncSettings();
+  try {
+    const { FilesetResolver, ImageSegmenter } = await import(new URL(AI_DIR + '/vision_bundle.mjs', location.href).href);
+    const files = await FilesetResolver.forVisionTasks(new URL(AI_DIR + '/wasm', location.href).href);
+    const make = (delegate) => ImageSegmenter.createFromOptions(files, {
+      baseOptions: { modelAssetPath: new URL(AI_MODEL, location.href).href, delegate },
+      runningMode: 'VIDEO', outputConfidenceMasks: true, outputCategoryMask: false,
+    });
+    try { segmenter = await make('GPU'); } catch { segmenter = await make('CPU'); }
+    const found = segmenter.getLabels().map((l, i) => (/skin/i.test(l) ? i : -1)).filter((i) => i >= 0);
+    if (found.length) skinClasses = found;
+    aiStatus = 'ready';
+  } catch (err) {
+    console.error(err);
+    segmenter = null;
+    aiStatus = 'failed';
+  }
+  syncSettings();
+}
+
+// Run the AI on the visible part of a frame. `smooth` blends with the last mask to steady video.
+function segmentSkin(src, geom, smooth) {
+  const [cx, cy, cw, ch] = geom.crop, pw = cw * geom.srcW, ph = ch * geom.srcH, s = 256 / Math.max(pw, ph);
+  const w = Math.max(16, Math.round(pw * s)), h = Math.max(16, Math.round(ph * s));
+  if (segCanvas.width !== w || segCanvas.height !== h) { segCanvas.width = w; segCanvas.height = h; }
+  segCtx.drawImage(src, cx * geom.srcW, cy * geom.srcH, pw, ph, 0, 0, w, h);
+  segClock = Math.max(segClock + 1, performance.now());
+  let res;
+  try { res = segmenter.segmentForVideo(segCanvas, segClock); } catch (err) { console.error(err); return; }
+  try {
+    const masks = res.confidenceMasks, mw = masks[0].width, mh = masks[0].height, n = mw * mh;
+    const parts = skinClasses.map((i) => masks[i].getAsFloat32Array());
+    if (!smooth || !maskVals || maskVals.length !== n) { maskVals = new Float32Array(n); smooth = false; }
+    if (!maskBytes || maskBytes.length !== n) maskBytes = new Uint8Array(n);
+    let cover = 0;
+    for (let i = 0; i < n; i++) {
+      let v = 0;
+      for (const p of parts) v += p[i];
+      v = Math.min(1, Math.max(0, (v - 0.2) / 0.6)); // ignore faint edges the model is unsure of
+      maskVals[i] = smooth ? maskVals[i] * 0.4 + v * 0.6 : v;
+      maskBytes[i] = maskVals[i] * 255;
+      cover += maskVals[i];
+    }
+    gl.bindTexture(gl.TEXTURE_2D, GL.maskTex);
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, mw, mh, 0, gl.RED, gl.UNSIGNED_BYTE, maskBytes);
+    maskCrop = geom.crop.slice();
+    skinCover = cover / n;
+    maskReady = true;
+  } finally {
+    res.close();
+  }
+}
+
+// Live view: run the AI as often as the phone keeps up with.
+function segmentLive() {
+  if (!state.skin || !segmenter || lensSwitch) return;
+  if (segSkip > 0) { segSkip--; return; }
+  const t0 = performance.now();
+  segmentSkin(video, geo, true);
+  const cost = performance.now() - t0;
+  segSkip = cost > 14 ? Math.min(12, Math.ceil(cost / 12)) : 0; // a slow phone runs it less often, never stalling the view
+  syncAiTag();
+}
+
+function syncAiTag() {
+  $('aiTag').hidden = !(state.skin && maskReady && skinCover > 0.002 && (state.mode === 'live' || state.mode === 'still'));
+}
 
 /* ---------- Focus ----------
    iPhone Safari lets a page set the lens focus distance but not a focus point. Tap-to-focus
@@ -1532,6 +1797,14 @@ function showReticle(cx, cy) {
   r.style.animation = 'none'; void r.offsetWidth; r.style.animation = ''; // replay the pop-in
 }
 
+// A lens change loses the lens's focus lock; the focus point stays where it was.
+function dropFocusLock() {
+  afToken++;
+  state.lock = null;
+  $('reticle').hidden = true;
+  $('lockBadge').hidden = true;
+}
+
 function resetFocus(animate = false) {
   afToken++;
   state.lock = null;
@@ -1563,15 +1836,21 @@ function screenToSource(x, y) {
 
 /* ---------- Camera ---------- */
 // `quiet` restarts (switching lens, unlocking focus) keep the last frame on screen.
-async function startCamera({ quiet = false, retried = false } = {}) {
-  stopCamera();
-  if (!quiet) resetFocus();
+async function startCamera({ quiet = false, retried = false, keepRecording = false } = {}) {
+  stopCamera({ keepRecording });
+  if (!quiet) {
+    resetFocus();
+    setZoomTarget(state.zoomTarget);
+    state.zoom = state.zoomTarget;
+    state.physLens = state.facing === 'environment' ? lensForZoom(state.zoom) : 'wide';
+  }
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
     return setNoCam('This browser has no live camera access.');
   }
   if (!quiet) setMode('boot');
   const hd = state.res === 'hd';
-  const lensId = state.facing === 'environment' ? lensIds[lensDevice(state.lens)] : null;
+  const want = lensIds[state.physLens] ? state.physLens : 'wide';
+  const lensId = state.facing === 'environment' ? lensIds[want] : null;
   camConstraints = { width: { ideal: hd ? 1920 : 3840 }, height: { ideal: hd ? 1080 : 2160 }, frameRate: { ideal: 30 } };
   // Asking for one physical lens by id stops iOS from switching lenses on its own.
   if (lensId) camConstraints.deviceId = { exact: lensId }; else camConstraints.facingMode = { ideal: state.facing };
@@ -1581,7 +1860,7 @@ async function startCamera({ quiet = false, retried = false } = {}) {
     if (lensId && !retried) { // a remembered lens id can go stale
       lensIds = {};
       prefs.set('lensIds', lensIds);
-      return startCamera({ quiet, retried: true });
+      return startCamera({ quiet, retried: true, keepRecording });
     }
     const why = err && err.name === 'NotAllowedError' ? 'Camera access is blocked for this page.'
       : err && err.name === 'NotFoundError' ? 'No camera was found.' : 'The camera could not be started.';
@@ -1590,23 +1869,26 @@ async function startCamera({ quiet = false, retried = false } = {}) {
   video.srcObject = stream;
   try { await video.play(); } catch {}
   if (!video.videoWidth) await new Promise((res) => video.addEventListener('loadedmetadata', res, { once: true }));
+  streamLens = state.facing === 'user' ? 'front' : lensId ? want : 'wide';
   canvas.dataset.src = '';
   setMode('live');
   startLoop();
   ensureMic();
   if (state.facing === 'environment' && (await detectLenses()) && !retried) {
     // The first start can land on a virtual multi-lens camera; switch to the chosen physical lens.
-    const want = lensIds[lensDevice(state.lens)], have = stream.getVideoTracks()[0].getSettings().deviceId;
-    if (want && have && want !== have) return startCamera({ quiet: true, retried: true });
+    const id = lensIds[lensIds[state.physLens] ? state.physLens : 'wide'], have = stream.getVideoTracks()[0].getSettings().deviceId;
+    if (id && have && id !== have) return startCamera({ quiet: true, retried: true, keepRecording });
   }
   buildLenses();
+  syncHud();
 }
 
-function stopCamera() {
-  stopRecording();
+// A lens change while recording keeps the take (and the microphone) going.
+function stopCamera({ keepRecording = false } = {}) {
+  if (!keepRecording) stopRecording();
   loopToken++;
   if (stream) { stream.getTracks().forEach((t) => t.stop()); stream = null; }
-  releaseMic();
+  if (!keepRecording) releaseMic();
   video.srcObject = null;
 }
 
@@ -1637,7 +1919,9 @@ function setMode(mode) {
 }
 
 /* ---------- Stills (imported, shot with the iPhone camera, or re-graded) ---------- */
+let stillGen = 0; // bumps for every image loaded into stillCanvas
 async function loadStill(file) {
+  stillGen++;
   const url = URL.createObjectURL(file);
   try {
     const img = new Image();
@@ -1672,6 +1956,7 @@ async function openStill(file) {
 }
 
 function leaveStill() {
+  maskReady = false; // the live view starts a fresh skin mask
   endRegrade();
   stillCanvas.width = stillCanvas.height = 0;
   startCamera();
@@ -2064,6 +2349,7 @@ $('shutter').addEventListener('click', async () => {
     let focus = state.focusPt;
     if (state.mode === 'live') { flash(); focus = liveToStill(state.focusPt, grabLiveFrame()); }
     const shot = await renderPhoto(focus);
+    if (state.mode === 'live' && state.skin && segmenter) segmentSkin(video, geo, false);
     if (state.editing) {
       const rec = await updateShot(state.editing, shot);
       toast('Re-graded ' + rec.name);
@@ -2090,6 +2376,7 @@ $('modes').addEventListener('click', (e) => {
 $('flipBtn').addEventListener('click', () => {
   state.facing = state.facing === 'user' ? 'environment' : 'user';
   prefs.set('facing', state.facing);
+  state.zoom = state.zoomTarget = 1;
   startCamera();
 });
 $('discardBtn').addEventListener('click', leaveStill);
@@ -2126,6 +2413,11 @@ function syncSettings() {
   for (const b of $('resSeg').children) b.setAttribute('aria-checked', String(b.dataset.v === state.res));
   $('vigSwitch').setAttribute('aria-checked', String(state.vignette));
   for (const b of $('afSpeedSeg').children) b.setAttribute('aria-checked', String(b.dataset.v === state.afSpeed));
+  $('skinSwitch').setAttribute('aria-checked', String(state.skin));
+  $('skinNote').textContent = !state.skin ? 'Off: skin follows the look.'
+    : aiStatus === 'loading' ? 'Loading the AI model (about 27 MB, first time only)…'
+    : aiStatus === 'failed' ? 'The AI model couldn’t load here. Open the app from its web address and try again.'
+    : 'Finds people and keeps their skin natural and clear in every look.';
   $('rotSwitch').setAttribute('aria-checked', String(state.autoRotate));
   $('rotNote').textContent = !state.autoRotate ? 'Off: shots follow the screen.'
     : motion === 'denied' ? 'Motion access is off. Allow it in Settings → Safari → Motion & Orientation Access, then reopen the app.'
@@ -2147,6 +2439,13 @@ $('resSeg').addEventListener('click', (e) => {
   const b = e.target.closest('button'); if (!b || b.dataset.v === state.res) return;
   state.res = b.dataset.v; prefs.set('res', state.res); syncSettings();
   if (state.mode === 'live' || state.mode === 'boot') startCamera();
+});
+$('skinSwitch').addEventListener('click', () => {
+  state.skin = !state.skin;
+  prefs.set('skin', state.skin);
+  if (state.skin) loadSkinAI();
+  maskSig = '';
+  syncSettings(); syncAiTag(); requestRender();
 });
 $('afSpeedSeg').addEventListener('click', (e) => {
   const b = e.target.closest('button'); if (!b) return;
@@ -2328,6 +2627,7 @@ async function boot() {
   loadShots();
   enableMotion(false);
   startCamera();
+  if (state.skin) loadSkinAI().then(requestRender);
   if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
 }
 boot();
