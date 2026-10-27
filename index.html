@@ -106,6 +106,10 @@ input[type="range"]::-webkit-slider-runnable-track { height: 6px; border-radius:
 input[type="range"]::-moz-range-track { height: 6px; border-radius: 3px; background: var(--track, var(--line)); }
 input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 24px; height: 24px; margin-top: -9px; border-radius: 50%; background: var(--text); border: 3px solid var(--ink); box-shadow: 0 0 0 1px var(--line); }
 input[type="range"]::-moz-range-thumb { width: 18px; height: 18px; border-radius: 50%; background: var(--text); border: 3px solid var(--ink); }
+.cp-swatches { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0 12px; }
+.cp-swatches button { width: 34px; height: 34px; border-radius: 50%; background: var(--sw); border: 2px solid transparent; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.3); }
+.cp-swatches button[aria-checked="true"] { border-color: var(--text); box-shadow: inset 0 0 0 2px var(--ink); }
+.cp-range { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .adj-scale { display: flex; justify-content: space-between; font: 11px var(--mono); color: var(--dim); font-variant-numeric: tabular-nums; }
 
 /* Look strip */
@@ -303,6 +307,15 @@ legend { padding: 0; margin-bottom: 8px; font-weight: 600; }
       <input type="range" id="adjRange" min="0" max="12" step="1" aria-labelledby="adjLabel">
       <div class="adj-scale" id="adjScale"></div>
     </div>
+    <div class="adjust colour-panel" id="colourPanel" hidden>
+      <div class="adj-top"><span class="adj-label">Keep one colour</span><span class="adj-value" id="cpName">Red</span></div>
+      <div class="cp-swatches" id="cpSwatches" role="radiogroup" aria-label="Colour to keep"></div>
+      <div class="cp-range"><span class="adj-label" id="cpRangeLabel">Range</span>
+        <div class="seg" id="cpRange" role="radiogroup" aria-labelledby="cpRangeLabel">
+          <button role="radio" data-v="narrow">Narrow</button><button role="radio" data-v="medium">Medium</button><button role="radio" data-v="wide">Wide</button>
+        </div>
+      </div>
+    </div>
     <div class="reticle" id="reticle" hidden><span id="reticleTag">AF</span></div>
     <div class="lenses" id="lenses" role="radiogroup" aria-label="Lens" hidden></div>
     <button class="lock-badge" id="lockBadge" hidden aria-label="Unlock focus"><span id="lockText">AF LOCK</span><b aria-hidden="true">×</b></button>
@@ -455,7 +468,7 @@ const LENSES = {
 // Simulated iris. 'lens' leaves the lens as it is; an f-stop adds depth-of-field blur.
 const IRIS = [1.4, 2, 2.8, 4, 5.6, 8, 'lens'];
 // Settings a shot remembers so it can be re-graded later, like a RAW clip.
-const GRADE_KEYS = ['look', 'iso', 'kelvin', 'frame', 'grain', 'vignette', 'contrast', 'rolloff', 'iris', 'focusPt'];
+const GRADE_KEYS = ['look', 'iso', 'kelvin', 'frame', 'grain', 'vignette', 'contrast', 'rolloff', 'iris', 'focusPt', 'oneHue', 'oneRange'];
 
 const state = {
   mode: 'boot',            // boot | live | still | nocam
@@ -477,6 +490,8 @@ const state = {
   focusPt: [0.5, 0.5],     // focus point in the source frame (0..1), also the center of the simulated depth of field
   focusPrev: [0.5, 0.5],   // the previous focus point while the simulated depth of field racks to the new one
   afSpeed: prefs.get('afSpeed', 'medium'),
+  oneHue: prefs.get('oneHue', 'red'),      // the color One Colour keeps
+  oneRange: prefs.get('oneRange', 'medium'),
   lock: null,              // {af} while focus is locked by a tap
   falseColor: false,
   editing: null,           // shot being re-graded from its source frame
@@ -553,13 +568,44 @@ const LOOKS = [
     hues: [], shadow: [-0.006, 0, 0.01], high: [0, 0, 0], lift: 0 },
   { id: 'noir', name: 'Noir', contrast: 1.6, mid: 0.16, white: 6, perChannel: 0, sat: 0, wb: [1, 1, 1], mono: [0.5, 0.42, 0.08],
     hues: [], shadow: [0, 0, 0], high: [0, 0, 0], lift: 0.012 },
+  // Low-key: darker mids, inky crushed blacks (negative lift), muted color; highlights still roll off.
+  { id: 'dark', name: 'Dark Black', contrast: 1.62, mid: 0.12, white: 7, perChannel: 0.45, sat: 0.86, wb: [0.99, 1, 1.02],
+    hues: [{ h: 255, w: 32, shift: -6, sat: 0.9 }, { h: 55, w: 24, shift: -2, sat: 0.96 }],
+    shadow: [-0.006, 0, 0.008], high: [0.01, 0.004, -0.01], lift: -0.035 },
+  // Keeps the chosen color (state.oneHue) and turns everything else black and white.
+  { id: 'one', name: 'One Colour', contrast: 1.5, mid: 0.16, white: 7, perChannel: 0.35, sat: 1.18, wb: [1, 1, 1], mono: [0.5, 0.42, 0.08],
+    hues: [], shadow: [0, 0, 0], high: [0, 0, 0], lift: 0.01 },
 ];
+
+// Colors One Colour can keep, and how wide a band of hues counts as that color (Oklab degrees either side).
+const ONE_COLOURS = [
+  { id: 'red', name: 'Red', css: '#e0322d' }, { id: 'orange', name: 'Orange', css: '#f08a24' },
+  { id: 'yellow', name: 'Yellow', css: '#f2d024' }, { id: 'green', name: 'Green', css: '#3aa64f' },
+  { id: 'cyan', name: 'Cyan', css: '#1fb6cf' }, { id: 'blue', name: 'Blue', css: '#3768f0' },
+  { id: 'purple', name: 'Purple', css: '#8b46e8' }, { id: 'pink', name: 'Pink', css: '#ea4a9a' },
+];
+const ONE_RANGES = { narrow: 10, medium: 17, wide: 30 };
+const oneColour = () => ONE_COLOURS.find((c) => c.id === state.oneHue) || ONE_COLOURS[0];
+function hueOf(css) {
+  const [, A, B] = toOklab(...[1, 3, 5].map((i) => srgbToLin(parseInt(css.slice(i, i + 2), 16) / 255)));
+  return (Math.atan2(B, A) * 180) / Math.PI;
+}
+
+// How much of a color survives in One Colour: near the chosen hue and clearly colored, not grey.
+function keepWeight(r, g, b, { hue, range }) {
+  const [, A, B] = toOklab(r, g, b);
+  let d = (Math.atan2(B, A) * 180) / Math.PI - hue;
+  d = Math.abs(d - 360 * Math.round(d / 360));
+  return (1 - smooth(range, range + 10, d)) * smooth(0.025, 0.07, Math.hypot(A, B));
+}
 
 // Grade one scene-linear Rec.709 color into display sRGB (0..1).
 function grade(r, g, b, look, tone) {
   r = Math.max(r, 0) * look.wb[0]; g = Math.max(g, 0) * look.wb[1]; b = Math.max(b, 0) * look.wb[2];
-  if (look.mono) {
-    r = g = b = r * look.mono[0] + g * look.mono[1] + b * look.mono[2];
+  const keep = look.keep ? keepWeight(r, g, b, look.keep) : 0;
+  const grey = look.mono ? r * look.mono[0] + g * look.mono[1] + b * look.mono[2] : 0;
+  if (look.mono && keep <= 0) {
+    r = g = b = grey;
   } else {
     const [L, A, B] = toOklab(r, g, b);
     let C = Math.hypot(A, B), h = (Math.atan2(B, A) * 180) / Math.PI, sat = look.sat;
@@ -575,6 +621,7 @@ function grade(r, g, b, look, tone) {
       const y = Math.max(lum(r, g, b), 0), t = y > 0 ? y / (y - lo) : 0;
       r = y + (r - y) * t; g = y + (g - y) * t; b = y + (b - y) * t;
     }
+    if (look.mono) { r = grey + (r - grey) * keep; g = grey + (g - grey) * keep; b = grey + (b - grey) * keep; }
   }
   const y = lum(r, g, b), k = y > 1e-6 ? tone(y) / y : 0, pc = look.perChannel;
   const out = [r * k * (1 - pc) + tone(r) * pc, g * k * (1 - pc) + tone(g) * pc, b * k * (1 - pc) + tone(b) * pc].map((v) => linToSrgb(clamp01(v)));
@@ -848,11 +895,13 @@ function activeLut() {
     return lutCache.get('custom');
   }
   const look = LOOKS.find((l) => l.id === state.look) || LOOKS[0];
-  const key = `${look.id}|${state.contrast}|${state.rolloff}`;
+  const one = look.id === 'one';
+  const key = `${look.id}|${state.contrast}|${state.rolloff}` + (one ? `|${state.oneHue}|${state.oneRange}` : '');
   let lut = lutCache.get(look.id);
   if (!lut || lut.key !== key) {
     if (lut) gl.deleteTexture(lut.tex);
-    lut = { key, tex: makeLutTexture(LUT_N, bakeLook(look)), size: LUT_N, min: [0, 0, 0], max: [1, 1, 1], input: INPUTS.red };
+    const baked = one ? { ...look, keep: { hue: hueOf(oneColour().css), range: ONE_RANGES[state.oneRange] || ONE_RANGES.medium } } : look;
+    lut = { key, tex: makeLutTexture(LUT_N, bakeLook(baked)), size: LUT_N, min: [0, 0, 0], max: [1, 1, 1], input: INPUTS.red };
     lutCache.set(look.id, lut);
   }
   return lut;
@@ -1717,7 +1766,9 @@ function updateClipHud() {
   $('clipVal').textContent = 'C' + String(clip).padStart(4, '0');
 }
 
-const lookLabel = () => (state.look === 'custom' && customLut ? customLut.title : (LOOKS.find((l) => l.id === state.look) || LOOKS[0]).name);
+const lookLabel = () => (state.look === 'custom' && customLut ? customLut.title
+  : state.look === 'one' ? 'One Colour · ' + oneColour().name
+  : (LOOKS.find((l) => l.id === state.look) || LOOKS[0]).name);
 
 async function storeShot({ blob, thumb, w, h }, source, extra = {}) {
   const rec = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), name: nextClipName(), w, h, look: lookLabel(), settings: gradeSettings(), hasSource: !!source, created: Date.now(), ...extra };
@@ -1840,7 +1891,7 @@ function buildLooks() {
     b.appendChild(t);
     nav.appendChild(b);
   };
-  for (const look of LOOKS) chip(look.id, look.name, lookSwatches(look));
+  for (const look of LOOKS) chip(look.id, look.name, look.id === 'one' ? [oneColour().css, '#8a8a8a', '#2e2e2e'] : lookSwatches(look));
   if (customLut) chip('custom', customLut.title || 'My LUT', ['#c9c6bd', '#77746c', '#2b2a27']);
   chip('import', customLut ? 'Replace LUT' : '+ LUT', [], 'add');
   syncLooks();
@@ -1894,6 +1945,7 @@ const ADJ = {
 function openAdjust(which) {
   if (adjusting === which) return closeAdjust();
   adjusting = which;
+  closeColourPanel();
   const a = ADJ[which];
   for (const k in ADJ) $(ADJ[k].hud).setAttribute('aria-expanded', String(k === which));
   $('adjLabel').textContent = a.label;
@@ -1951,6 +2003,7 @@ $('hudFc').addEventListener('click', () => {
 $('view').addEventListener('click', (e) => {
   if (e.target.closest('.adjust, .lenses, .lock-badge, .notice')) return;
   if (adjusting) { closeAdjust(); return; }
+  if (!$('colourPanel').hidden) { closeColourPanel(); return; }
   if (state.mode !== 'live' && state.mode !== 'still') return;
   const uv = screenToSource(e.clientX, e.clientY);
   if (uv) focusAt(uv, e.clientX, e.clientY);
@@ -1960,8 +2013,39 @@ $('looks').addEventListener('click', (e) => {
   const b = e.target.closest('.chip');
   if (!b) return;
   if (b.dataset.look === 'import') return $('pickLut').click();
+  if (b.dataset.look === 'one' && state.look === 'one') { // tapping One Colour again shows or hides its colors
+    if ($('colourPanel').hidden) openColourPanel(); else closeColourPanel();
+    return;
+  }
   setLook(b.dataset.look);
+  if (b.dataset.look === 'one') openColourPanel(); else closeColourPanel();
 });
+
+/* One Colour picker */
+for (const c of ONE_COLOURS) {
+  const b = document.createElement('button');
+  b.setAttribute('role', 'radio');
+  b.setAttribute('aria-label', c.name);
+  b.dataset.v = c.id;
+  b.style.setProperty('--sw', c.css);
+  $('cpSwatches').appendChild(b);
+}
+function syncColourPanel() {
+  for (const b of $('cpSwatches').children) b.setAttribute('aria-checked', String(b.dataset.v === state.oneHue));
+  for (const b of $('cpRange').children) b.setAttribute('aria-checked', String(b.dataset.v === state.oneRange));
+  $('cpName').textContent = oneColour().name;
+}
+function openColourPanel() { closeAdjust(); syncColourPanel(); $('colourPanel').hidden = false; }
+function closeColourPanel() { $('colourPanel').hidden = true; }
+for (const [id, key] of [['cpSwatches', 'oneHue'], ['cpRange', 'oneRange']]) {
+  $(id).addEventListener('click', (e) => {
+    const b = e.target.closest('button');
+    if (!b || b.dataset.v === state[key]) return;
+    state[key] = b.dataset.v;
+    prefs.set(key, state[key]);
+    syncColourPanel(); buildLooks(); requestRender();
+  });
+}
 
 /* Shutter */
 let busy = false;
