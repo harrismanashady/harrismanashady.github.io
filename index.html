@@ -166,11 +166,17 @@ input[type="range"]::-moz-range-thumb { width: 18px; height: 18px; border-radius
 [data-rec="true"] .tally i { animation: blink 1s steps(2, jump-none) infinite; }
 @keyframes blink { 50% { opacity: 0.15; } }
 .rec-tc {
-  position: absolute; top: 12px; left: max(12px, env(safe-area-inset-left, 0px)); display: flex; align-items: center; gap: 8px;
+  position: absolute; top: 12px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 8px;
   background: rgba(0, 0, 0, 0.62); border: 1px solid rgba(238, 43, 47, 0.6); border-radius: 6px; padding: 4px 10px;
   font: 500 13px var(--mono); font-variant-numeric: tabular-nums; pointer-events: none;
 }
 .rec-tc i { width: 8px; height: 8px; border-radius: 50%; background: var(--rec); }
+.hdr-btn {
+  position: absolute; top: 12px; left: max(12px, env(safe-area-inset-left, 0px)); padding: 5px 10px; border-radius: 6px;
+  background: rgba(0, 0, 0, 0.55); border: 1px solid rgba(255, 255, 255, 0.22); color: var(--dim); font: 700 11px var(--mono); letter-spacing: 0.08em;
+}
+.hdr-btn:not([data-level="off"]) { color: var(--af); border-color: var(--af); }
+[data-mode="boot"] .hdr-btn, [data-mode="nocam"] .hdr-btn { display: none; }
 
 /* Focus, lenses */
 .reticle { position: absolute; width: 76px; height: 76px; margin: -38px 0 0 -38px; border: 1.5px solid var(--af); pointer-events: none; animation: reticle-in 0.25s ease-out; }
@@ -325,6 +331,7 @@ legend { padding: 0; margin-bottom: 8px; font-weight: 600; }
     <div class="zoom-readout" id="zoomReadout" hidden>1×</div>
     <div class="ai-tag" id="aiTag" hidden><i></i>AI · SKIN</div>
     <button class="lock-badge" id="lockBadge" hidden aria-label="Unlock focus"><span id="lockText">AF LOCK</span><b aria-hidden="true">×</b></button>
+    <button class="hdr-btn" id="hdrBtn" data-level="off" aria-label="HDR off">HDR OFF</button>
     <div class="rec-tc" id="recTc" hidden><i></i><b>REC</b><span id="recTime">00:00:00:00</span></div>
     <div class="toast hide" id="toast" role="status" aria-live="polite"></div>
   </main>
@@ -374,6 +381,11 @@ legend { padding: 0; margin-bottom: 8px; font-weight: 600; }
   <div class="row"><span>Film grain</span>
     <div class="seg" id="grainSeg" role="radiogroup" aria-label="Film grain">
       <button role="radio" data-v="0">Off</button><button role="radio" data-v="0.45">Fine</button><button role="radio" data-v="0.75">Medium</button><button role="radio" data-v="1.1">Heavy</button>
+    </div>
+  </div>
+  <div class="field"><span id="hdrLabel">HDR<small class="fine" id="hdrNote"></small></span>
+    <div class="seg full" id="hdrSeg" role="radiogroup" aria-labelledby="hdrLabel">
+      <button role="radio" data-v="off">Off</button><button role="radio" data-v="natural">Natural</button><button role="radio" data-v="strong">Strong</button>
     </div>
   </div>
   <div class="row"><span id="skinLabel">AI skin tone<small class="fine" id="skinNote">Finds people and keeps their skin natural and clear in every look.</small></span><button class="switch" id="skinSwitch" role="switch" aria-labelledby="skinLabel" aria-checked="true"></button></div>
@@ -473,10 +485,13 @@ const LENSES = {
 };
 // Zoom buttons, like the iPhone camera's; 2 is a crop of the main lens.
 const ZOOM_PRESETS = [{ lens: 'ultra', label: '.5', zoom: LENSES.ultra.zoom }, { lens: 'wide', label: '1', zoom: 1 }, { lens: 'wide', label: '2', zoom: 2 }, { lens: 'tele', label: '3', zoom: LENSES.tele.zoom }];
+// HDR tone mapping strength: how much large-scale brightness is pulled toward mid grey.
+const HDR_LEVELS = { off: 0, natural: 0.35, strong: 0.55 };
+const HDR_LABELS = { off: 'HDR OFF', natural: 'HDR', strong: 'HDR+' };
 // Simulated iris. 'lens' leaves the lens as it is; an f-stop adds depth-of-field blur.
 const IRIS = [1.4, 2, 2.8, 4, 5.6, 8, 'lens'];
 // Settings a shot remembers so it can be re-graded later, like a RAW clip.
-const GRADE_KEYS = ['look', 'iso', 'kelvin', 'frame', 'grain', 'vignette', 'contrast', 'rolloff', 'iris', 'focusPt', 'oneHue', 'oneRange', 'skin'];
+const GRADE_KEYS = ['look', 'iso', 'kelvin', 'frame', 'grain', 'vignette', 'contrast', 'rolloff', 'iris', 'focusPt', 'oneHue', 'oneRange', 'skin', 'hdr'];
 
 const state = {
   mode: 'boot',            // boot | live | still | nocam
@@ -497,6 +512,7 @@ const state = {
   zoomTarget: 1,
   physLens: 'wide',        // the back camera to open: ultra | wide | tele
   skin: prefs.get('skin', true), // AI: keep people's skin natural
+  hdr: prefs.get('hdr', 'off'),  // off | natural | strong
   iris: prefs.get('iris', 'lens'),
   focusPt: [0.5, 0.5],     // focus point in the source frame (0..1), also the center of the simulated depth of field
   focusPrev: [0.5, 0.5],   // the previous focus point while the simulated depth of field racks to the new one
@@ -761,6 +777,8 @@ uniform float uFocusMix;   // 0 = focus on uFocusPrev, 1 = on uFocusPt
 uniform vec2 uTexSize;     // source size in pixels
 uniform float uCropShortPx;
 uniform float uBlurPx;     // simulated depth of field: blur radius far from focus, in source pixels
+uniform float uHdr;        // HDR tone mapping strength (0 = off)
+uniform vec2 uHdrLod;      // mip levels for the fine and coarse brightness estimates
 out vec4 outColor;
 
 const mat3 M709to2020 = mat3(
@@ -824,6 +842,18 @@ void main() {
     lin = fetchLin(vSrc, 0.0);
   }
   if (uSnapMix > 0.0) lin = mix(lin, restoreHighlights(srgbToLin(texture(uSnap, vSnap).rgb)), uSnapMix);
+
+  // HDR tone mapping: pull large-scale brightness toward mid grey, so bright skies come down and
+  // shadows open up, while local detail stays. The base brightness blends two blur sizes; near a
+  // strong edge the smaller one takes over, which keeps bright and dark areas from haloing.
+  if (uHdr > 0.0) {
+    const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
+    float l0 = log2(max(dot(lin, LUMA), 1e-5));
+    float fine = log2(max(dot(fetchLin(vSrc, uHdrLod.x), LUMA), 1e-5));
+    float coarse = log2(max(dot(fetchLin(vSrc, uHdrLod.y), LUMA), 1e-5));
+    float base = mix(fine, coarse, exp(-0.5 * (l0 - coarse) * (l0 - coarse)));
+    lin *= exp2(clamp(-uHdr * (base - log2(0.18)), -2.5, 2.5));
+  }
   lin *= uWB * uExposure;
   vec3 enc;
   if (uInput > 1.5) {
@@ -891,7 +921,7 @@ function initGL() {
   if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
   GL.prog = prog;
   GL.u = {};
-  for (const name of ['uCrop', 'uFlip', 'uTurn', 'uImage', 'uLut', 'uLutSize', 'uLutMin', 'uLutMax', 'uInput', 'uExpandA', 'uExposure', 'uWB', 'uGrain', 'uSeed', 'uAspect', 'uVignette', 'uFalseColor', 'uFocusPt', 'uFocusPrev', 'uFocusMix', 'uTexSize', 'uCropShortPx', 'uBlurPx', 'uSnap', 'uSnapCrop', 'uSnapMix', 'uMask', 'uMaskCrop', 'uSkin', 'uSkinLut', 'uSkinLutSize']) {
+  for (const name of ['uCrop', 'uFlip', 'uTurn', 'uImage', 'uLut', 'uLutSize', 'uLutMin', 'uLutMax', 'uInput', 'uExpandA', 'uExposure', 'uWB', 'uGrain', 'uSeed', 'uAspect', 'uVignette', 'uFalseColor', 'uFocusPt', 'uFocusPrev', 'uFocusMix', 'uTexSize', 'uCropShortPx', 'uBlurPx', 'uSnap', 'uSnapCrop', 'uSnapMix', 'uMask', 'uMaskCrop', 'uSkin', 'uSkinLut', 'uSkinLutSize', 'uHdr', 'uHdrLod']) {
     GL.u[name] = gl.getUniformLocation(prog, name);
   }
   GL.vao = gl.createVertexArray();
@@ -1016,10 +1046,10 @@ function uploadSource(el) {
   gl.bindTexture(gl.TEXTURE_2D, GL.frameTex);
   gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
   gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, el);
-  // The simulated iris samples smaller copies of the frame so a wide blur stays smooth.
-  const blur = state.iris !== 'lens';
-  if (blur) gl.generateMipmap(gl.TEXTURE_2D);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, blur ? gl.LINEAR_MIPMAP_LINEAR : gl.LINEAR);
+  // The simulated iris and HDR sample smaller copies of the frame (blur, local brightness).
+  const mips = state.iris !== 'lens' || state.hdr !== 'off';
+  if (mips) gl.generateMipmap(gl.TEXTURE_2D);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, mips ? gl.LINEAR_MIPMAP_LINEAR : gl.LINEAR);
 }
 
 // Blur radius in source pixels for the simulated iris, at full distance from focus.
@@ -1058,6 +1088,9 @@ function draw(w, h, { capture = false, mirror = false, turn = 0, geom = geo, foc
   gl.uniform2f(u.uTexSize, geom.srcW, geom.srcH);
   gl.uniform1f(u.uCropShortPx, Math.min(geom.crop[2] * geom.srcW, geom.crop[3] * geom.srcH));
   gl.uniform1f(u.uBlurPx, irisBlurPx(geom));
+  const visH = geom.crop[3] * geom.srcH; // brightness is judged over about 1/72 and 1/18 of the picture
+  gl.uniform1f(u.uHdr, HDR_LEVELS[state.hdr] || 0);
+  gl.uniform2f(u.uHdrLod, Math.log2(Math.max(1, visH / 72)), Math.log2(Math.max(1, visH / 18)));
   gl.uniform1i(u.uSnap, 4);
   gl.uniform4fv(u.uSnapCrop, snapCrop || geom.crop);
   gl.uniform1f(u.uSnapMix, snapMix);
@@ -2199,6 +2232,7 @@ function syncHud() {
   $('frameVal').textContent = state.frame;
   $('hudFc').setAttribute('aria-pressed', String(state.falseColor));
   $('irisVal').textContent = ADJ.iris.format(state.iris);
+  syncHdr();
   $('hudIris').querySelector('small').textContent = state.iris === 'lens' ? 'Iris' : 'Iris sim';
 }
 
@@ -2286,7 +2320,7 @@ $('hudFc').addEventListener('click', () => {
 });
 // Tapping the viewfinder focuses and meters at that spot; with a panel open it just closes it.
 $('view').addEventListener('click', (e) => {
-  if (e.target.closest('.adjust, .lenses, .lock-badge, .notice')) return;
+  if (e.target.closest('.adjust, .lenses, .lock-badge, .notice, .hdr-btn')) return;
   if (adjusting) { closeAdjust(); return; }
   if (!$('colourPanel').hidden) { closeColourPanel(); return; }
   if (state.mode !== 'live' && state.mode !== 'still') return;
@@ -2413,6 +2447,8 @@ function syncSettings() {
   for (const b of $('resSeg').children) b.setAttribute('aria-checked', String(b.dataset.v === state.res));
   $('vigSwitch').setAttribute('aria-checked', String(state.vignette));
   for (const b of $('afSpeedSeg').children) b.setAttribute('aria-checked', String(b.dataset.v === state.afSpeed));
+  for (const b of $('hdrSeg').children) b.setAttribute('aria-checked', String(b.dataset.v === state.hdr));
+  $('hdrNote').textContent = 'Brings bright skies down and opens up shadows, keeping detail. iPhone doesn’t let web apps shoot several exposures, so this tone-maps each frame.';
   $('skinSwitch').setAttribute('aria-checked', String(state.skin));
   $('skinNote').textContent = !state.skin ? 'Off: skin follows the look.'
     : aiStatus === 'loading' ? 'Loading the AI model (about 27 MB, first time only)…'
@@ -2440,6 +2476,22 @@ $('resSeg').addEventListener('click', (e) => {
   state.res = b.dataset.v; prefs.set('res', state.res); syncSettings();
   if (state.mode === 'live' || state.mode === 'boot') startCamera();
 });
+function setHdr(level, announce) {
+  state.hdr = level;
+  prefs.set('hdr', level);
+  syncHdr(); syncSettings();
+  if (state.mode === 'still') uploadSource(stillCanvas); // HDR needs the image's mipmaps
+  requestRender();
+  if (announce) toast({ off: 'HDR off', natural: 'HDR: highlights and shadows balanced', strong: 'HDR+: strong highlight and shadow recovery' }[level]);
+}
+function syncHdr() {
+  const b = $('hdrBtn');
+  b.dataset.level = state.hdr;
+  b.textContent = HDR_LABELS[state.hdr];
+  b.setAttribute('aria-label', { off: 'HDR off', natural: 'HDR on', strong: 'HDR strong' }[state.hdr]);
+}
+$('hdrBtn').addEventListener('click', () => setHdr({ off: 'natural', natural: 'strong', strong: 'off' }[state.hdr], true));
+$('hdrSeg').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b && b.dataset.v !== state.hdr) setHdr(b.dataset.v, false); });
 $('skinSwitch').addEventListener('click', () => {
   state.skin = !state.skin;
   prefs.set('skin', state.skin);
@@ -2557,7 +2609,7 @@ async function openViewer(rec) {
   $('viewerMeta').innerHTML = '';
   const s = rec.settings || {};
   const label = (list, id) => (list.find((x) => x.id === id) || {}).label || '';
-  for (const [k, v] of [['LOOK', rec.look], ['ISO', s.iso], ['WB', s.kelvin && s.kelvin + 'K'], ['CONTRAST', label(CONTRASTS, s.contrast)], ['ROLL-OFF', label(ROLLOFFS, s.rolloff)], ['IRIS', s.iris && s.iris !== 'lens' ? 'f/' + s.iris + ' (simulated)' : ''], ['', new Date(rec.edited || rec.created).toLocaleString()]]) {
+  for (const [k, v] of [['LOOK', rec.look], ['ISO', s.iso], ['WB', s.kelvin && s.kelvin + 'K'], ['CONTRAST', label(CONTRASTS, s.contrast)], ['ROLL-OFF', label(ROLLOFFS, s.rolloff)], ['IRIS', s.iris && s.iris !== 'lens' ? 'f/' + s.iris + ' (simulated)' : ''], ['HDR', s.hdr && s.hdr !== 'off' ? { natural: 'Natural', strong: 'Strong' }[s.hdr] : ''], ['', new Date(rec.edited || rec.created).toLocaleString()]]) {
     if (!v) continue;
     const span = document.createElement('span');
     if (k) { const b = document.createElement('b'); b.textContent = k + ' '; span.appendChild(b); }
