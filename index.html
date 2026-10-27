@@ -173,10 +173,10 @@ input[type="range"]::-moz-range-thumb { width: 18px; height: 18px; border-radius
 .reticle::before { left: 50%; top: -1px; width: 1.5px; height: 8px; box-shadow: 0 75px 0 var(--af); }
 .reticle::after { top: 50%; left: -1px; height: 1.5px; width: 8px; box-shadow: 75px 0 0 var(--af); }
 .reticle span { position: absolute; top: 100%; left: 50%; transform: translateX(-50%) rotate(var(--ui-rot, 0deg)); margin-top: 13px; font: 600 10px var(--mono); color: var(--af); letter-spacing: 0.08em; white-space: nowrap; }
-.reticle.hunting { animation: reticle-in 0.25s ease-out, reticle-pulse 0.45s ease-in-out 0.25s infinite alternate; }
+.reticle.hunting { animation: reticle-in 0.25s ease-out, reticle-pulse 0.9s ease-in-out 0.25s infinite alternate; }
 .reticle.locked { opacity: 0.6; }
 @keyframes reticle-in { from { transform: scale(1.4); opacity: 0; } }
-@keyframes reticle-pulse { to { transform: scale(0.88); } }
+@keyframes reticle-pulse { to { transform: scale(0.94); opacity: 0.75; } }
 .lock-badge {
   position: absolute; top: 12px; right: max(12px, env(safe-area-inset-right, 0px)); display: flex; align-items: center; gap: 8px;
   background: rgba(0, 0, 0, 0.62); border: 1px solid var(--af); color: var(--af); border-radius: 6px; padding: 5px 10px;
@@ -305,7 +305,7 @@ legend { padding: 0; margin-bottom: 8px; font-weight: 600; }
     </div>
     <div class="reticle" id="reticle" hidden><span id="reticleTag">AF</span></div>
     <div class="lenses" id="lenses" role="radiogroup" aria-label="Lens" hidden></div>
-    <button class="lock-badge" id="lockBadge" hidden aria-label="Unlock focus and exposure"><span id="lockText">AF·AE LOCK</span><b aria-hidden="true">×</b></button>
+    <button class="lock-badge" id="lockBadge" hidden aria-label="Unlock focus"><span id="lockText">AF LOCK</span><b aria-hidden="true">×</b></button>
     <div class="rec-tc" id="recTc" hidden><i></i><b>REC</b><span id="recTime">00:00:00:00</span></div>
     <div class="toast hide" id="toast" role="status" aria-live="polite"></div>
   </main>
@@ -355,6 +355,11 @@ legend { padding: 0; margin-bottom: 8px; font-weight: 600; }
   <div class="row"><span>Film grain</span>
     <div class="seg" id="grainSeg" role="radiogroup" aria-label="Film grain">
       <button role="radio" data-v="0">Off</button><button role="radio" data-v="0.45">Fine</button><button role="radio" data-v="0.75">Medium</button><button role="radio" data-v="1.1">Heavy</button>
+    </div>
+  </div>
+  <div class="row"><span id="afSpeedLabel">Focus transition<small class="fine">How fast focus moves to a spot you tap.</small></span>
+    <div class="seg" id="afSpeedSeg" role="radiogroup" aria-labelledby="afSpeedLabel">
+      <button role="radio" data-v="slow">Slow</button><button role="radio" data-v="medium">Medium</button><button role="radio" data-v="fast">Fast</button>
     </div>
   </div>
   <div class="row"><span id="rotLabel">Auto-rotate<small class="fine" id="rotNote">Saves landscape or portrait from how you hold the phone.</small></span><button class="switch" id="rotSwitch" role="switch" aria-labelledby="rotLabel" aria-checked="true"></button></div>
@@ -470,7 +475,9 @@ const state = {
   lens: prefs.get('lens', 'wide'),
   iris: prefs.get('iris', 'lens'),
   focusPt: [0.5, 0.5],     // focus point in the source frame (0..1), also the center of the simulated depth of field
-  lock: null,              // {af, iso} while focus/exposure are locked by a tap
+  focusPrev: [0.5, 0.5],   // the previous focus point while the simulated depth of field racks to the new one
+  afSpeed: prefs.get('afSpeed', 'medium'),
+  lock: null,              // {af} while focus is locked by a tap
   falseColor: false,
   editing: null,           // shot being re-graded from its source frame
 };
@@ -680,6 +687,8 @@ uniform float uAspect;
 uniform float uVignette;
 uniform float uFalseColor;
 uniform vec2 uFocusPt;     // focus point in the source frame
+uniform vec2 uFocusPrev;   // previous focus point while racking
+uniform float uFocusMix;   // 0 = focus on uFocusPrev, 1 = on uFocusPt
 uniform vec2 uTexSize;     // source size in pixels
 uniform float uCropShortPx;
 uniform float uBlurPx;     // simulated depth of field: blur radius far from focus, in source pixels
@@ -726,8 +735,10 @@ void main() {
   // It runs in linear light, after highlights are restored, so bright points bloom into bokeh.
   float rad = 0.0;
   if (uBlurPx > 0.5) {
-    float d = length((vSrc - uFocusPt) * uTexSize) / uCropShortPx;
-    rad = uBlurPx * smoothstep(0.14, 0.7, d);
+    // Racking focus: the old subject softens while the new one sharpens.
+    float dNew = length((vSrc - uFocusPt) * uTexSize) / uCropShortPx;
+    float dOld = length((vSrc - uFocusPrev) * uTexSize) / uCropShortPx;
+    rad = uBlurPx * mix(smoothstep(0.14, 0.7, dOld), smoothstep(0.14, 0.7, dNew), uFocusMix);
   }
   vec3 lin;
   if (rad > 0.75) {
@@ -797,7 +808,7 @@ function initGL() {
   if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
   GL.prog = prog;
   GL.u = {};
-  for (const name of ['uCrop', 'uFlip', 'uTurn', 'uImage', 'uLut', 'uLutSize', 'uLutMin', 'uLutMax', 'uInput', 'uExpandA', 'uExposure', 'uWB', 'uGrain', 'uSeed', 'uAspect', 'uVignette', 'uFalseColor', 'uFocusPt', 'uTexSize', 'uCropShortPx', 'uBlurPx']) {
+  for (const name of ['uCrop', 'uFlip', 'uTurn', 'uImage', 'uLut', 'uLutSize', 'uLutMin', 'uLutMax', 'uInput', 'uExpandA', 'uExposure', 'uWB', 'uGrain', 'uSeed', 'uAspect', 'uVignette', 'uFalseColor', 'uFocusPt', 'uFocusPrev', 'uFocusMix', 'uTexSize', 'uCropShortPx', 'uBlurPx']) {
     GL.u[name] = gl.getUniformLocation(prog, name);
   }
   GL.vao = gl.createVertexArray();
@@ -920,6 +931,7 @@ function irisBlurPx(geom) {
 }
 
 function draw(w, h, { capture = false, mirror = false, turn = 0, geom = geo, focus = state.focusPt, seed = Math.random() * 500 } = {}) {
+  const racking = !capture && focus === state.focusPt; // photos are saved fully focused on the target
   const lut = activeLut(), u = GL.u;
   gl.viewport(0, 0, w, h);
   gl.useProgram(GL.prog);
@@ -942,6 +954,8 @@ function draw(w, h, { capture = false, mirror = false, turn = 0, geom = geo, foc
   gl.uniform1f(u.uVignette, state.vignette ? 1 : 0);
   gl.uniform1f(u.uFalseColor, !capture && state.falseColor ? 1 : 0);
   gl.uniform2fv(u.uFocusPt, focus);
+  gl.uniform2fv(u.uFocusPrev, racking ? state.focusPrev : focus);
+  gl.uniform1f(u.uFocusMix, racking ? focusMix() : 1);
   gl.uniform2f(u.uTexSize, geom.srcW, geom.srcH);
   gl.uniform1f(u.uCropShortPx, Math.min(geom.crop[2] * geom.srcW, geom.crop[3] * geom.srcH));
   gl.uniform1f(u.uBlurPx, irisBlurPx(geom));
@@ -959,6 +973,7 @@ function requestRender() {
   requestAnimationFrame(() => {
     renderQueued = false;
     if (state.mode === 'still' && geo) { gl.bindFramebuffer(gl.FRAMEBUFFER, null); draw(canvas.width, canvas.height, { seed: 7 }); }
+    if (focusAnim) requestRender(); // keep drawing while the focus racks
   });
 }
 
@@ -1313,99 +1328,149 @@ $('lenses').addEventListener('click', (e) => {
   else startCamera({ quiet: true });
 });
 
-/* ---------- Focus and exposure ----------
-   iPhone Safari lets a page set the lens focus distance but not a focus point, so tap-to-focus
-   sweeps the focus distance and keeps the setting that is sharpest at the tapped spot, the way
-   contrast-detect autofocus works. The tap also spot-meters exposure. */
+/* ---------- Focus ----------
+   iPhone Safari lets a page set the lens focus distance but not a focus point. Tap-to-focus
+   therefore drives the lens itself, the way contrast-detect autofocus works: it moves smoothly
+   from where focus already is, watches the sharpness at the tapped spot, and eases back onto
+   the sharpest point once it has passed it, so a change of subject looks like a focus pull.
+   Exposure is left alone. */
+const AF_SPEEDS = {
+  slow: { label: 'Slow', steps: 60, dof: 1.6 },     // steps: camera frames to travel the whole focus range
+  medium: { label: 'Medium', steps: 32, dof: 0.9 }, // dof: seconds for the simulated depth of field to rack
+  fast: { label: 'Fast', steps: 14, dof: 0.45 },
+};
 const probe = document.createElement('canvas');
 probe.width = probe.height = 96;
 const probeCtx = probe.getContext('2d', { willReadFrequently: true });
-let afToken = 0, focusNoteShown = false;
+let afToken = 0, focusNoteShown = false, focusAnim = null;
 
-// Brightness (linear) and sharpness (variance of the Laplacian) around a point of a video or canvas.
-function regionStats(src, [u, v], size = 0.08) {
+// Sharpness (variance of the Laplacian) around a point of a video or canvas.
+function regionSharpness(src, [u, v], size = 0.08) {
   const sw = src.videoWidth || src.width, sh = src.videoHeight || src.height;
-  if (!sw || !sh) return null;
+  if (!sw || !sh) return 0;
   const side = Math.max(16, Math.round(Math.min(sw, sh) * size));
   const sx = Math.min(Math.max(u * sw - side / 2, 0), sw - side), sy = Math.min(Math.max(v * sh - side / 2, 0), sh - side);
   probeCtx.drawImage(src, sx, sy, side, side, 0, 0, 96, 96);
   const d = probeCtx.getImageData(0, 0, 96, 96).data, g = new Float32Array(96 * 96);
-  let light = 0;
-  for (let i = 0; i < g.length; i++) {
-    const r = d[i * 4] / 255, gr = d[i * 4 + 1] / 255, b = d[i * 4 + 2] / 255;
-    g[i] = lum(r, gr, b);
-    light += lum(srgbToLin(r), srgbToLin(gr), srgbToLin(b));
-  }
+  for (let i = 0; i < g.length; i++) g[i] = lum(d[i * 4], d[i * 4 + 1], d[i * 4 + 2]) / 255;
   let s = 0, s2 = 0, n = 0;
   for (let y = 1; y < 95; y++) for (let x = 1; x < 95; x++) {
     const i = y * 96 + x, l = 4 * g[i] - g[i - 1] - g[i + 1] - g[i - 96] - g[i + 96];
     s += l; s2 += l * l; n++;
   }
-  return { light: light / g.length, sharp: s2 / n - (s / n) ** 2 };
+  return s2 / n - (s / n) ** 2;
 }
 
 const nextFrame = () => new Promise((res) => (video.requestVideoFrameCallback ? video.requestVideoFrameCallback(() => res()) : requestAnimationFrame(() => res())));
-const nearestIso = (v) => ISOS.reduce((a, b) => (Math.abs(Math.log2(b / v)) < Math.abs(Math.log2(a / v)) ? b : a));
 
-async function contrastAF(uv, token) {
+// Resolves 'locked', 'flat' (no clear peak: focus goes back where it was) or 'unsupported'.
+async function smoothAF(uv, token) {
   const track = stream && stream.getVideoTracks()[0];
   let range = null;
   try { range = track && track.getCapabilities && track.getCapabilities().focusDistance; } catch {}
-  if (!range || !(range.max > range.min)) return false;
+  if (!range || !(range.max > range.min)) return 'unsupported';
   const { width, height, frameRate } = camConstraints;
-  const setFocus = (d) => track.applyConstraints({ width, height, frameRate, advanced: [{ focusDistance: d }] });
-  const sharpnessAt = async (d) => {
-    await setFocus(d);
-    for (let i = 0; i < 3; i++) await nextFrame(); // let the lens settle
-    if (token !== afToken) throw new Error('superseded');
-    return regionStats(video, uv).sharp;
+  const { min, max } = range, clampPos = (p) => Math.min(max, Math.max(min, p));
+  const current = () => { if (token !== afToken) throw new Error('superseded'); };
+  let pos = track.getSettings().focusDistance;
+  pos = clampPos(typeof pos === 'number' && isFinite(pos) ? pos : (min + max) / 2);
+  const setPos = async (p) => {
+    pos = clampPos(p);
+    await track.applyConstraints({ width, height, frameRate, advanced: [{ focusDistance: pos }] });
+    current();
   };
-  const { min, max } = range, steps = 6; // coarse pass, then two finer passes around the best
-  let step = (max - min) / steps, best = min, bestSharp = -1;
-  for (let i = 0; i <= steps; i++) {
-    const d = min + step * i, s = await sharpnessAt(d);
-    if (s > bestSharp) { bestSharp = s; best = d; }
-  }
-  for (let round = 0; round < 2; round++) { // narrow in around the sharpest setting
-    step /= 2;
-    const center = best;
-    for (const d of [center - step, center + step]) {
-      if (d < min || d > max) continue;
-      const s = await sharpnessAt(d);
-      if (s > bestSharp) { bestSharp = s; best = d; }
+  const sharpNow = async () => { await nextFrame(); current(); return regionSharpness(video, uv); };
+
+  await setPos(pos); // take over from continuous autofocus where the lens already is
+  const startPos = pos, start = await sharpNow(), gain = 1.05, samples = [[pos, start]];
+  const full = (max - min) / AF_SPEEDS[state.afSpeed].steps;
+  let dir = pos - min > max - pos ? -1 : 1; // head into the longer stretch of the range first
+  let best = start, prev = start, falling = 0, reversed = false, n = 0;
+  for (let guard = 0; guard < AF_SPEEDS[state.afSpeed].steps * 3; guard++) {
+    const step = full * Math.min(1, ++n / 4); // ease in
+    const next = pos + dir * step;
+    if (next < min || next > max) {
+      if (!reversed && best <= start * gain) { reversed = true; dir = -dir; n = 0; continue; }
+      break; // the sharpest point is at the end of the range
+    }
+    await setPos(next);
+    const s = await sharpNow();
+    samples.push([pos, s]);
+    if (s > best) { best = s; falling = 0; }
+    else if (s < prev) falling++;
+    prev = s;
+    if (falling >= 3) {
+      if (best > start * gain) break; // past the peak
+      if (reversed) break;
+      reversed = true; dir = -dir; falling = 0; n = 0; // wrong way: turn round
     }
   }
-  await setFocus(best);
-  return true;
+  // Ease onto the sharpest point, or back to where focus started if nothing got sharper.
+  const found = best > start * gain, from = pos, to = clampPos(found ? sharpestPos(samples) : startPos);
+  for (let i = 1; i <= 8; i++) await setPos(from + (to - from) * (1 - (1 - i / 8) ** 3)), await nextFrame();
+  return found ? 'locked' : 'flat';
+}
+
+// Where sharpness peaks: a parabola through the sharpest reading and its neighbors on either side.
+function sharpestPos(samples) {
+  const pts = samples.slice().sort((a, b) => a[0] - b[0]);
+  let i = 0;
+  for (let k = 1; k < pts.length; k++) if (pts[k][1] > pts[i][1]) i = k;
+  if (i === 0 || i === pts.length - 1) return pts[i][0];
+  const [x0, y0] = pts[i - 1], [x1, y1] = pts[i], [x2, y2] = pts[i + 1];
+  const den = (x1 - x0) * (y1 - y2) - (x1 - x2) * (y1 - y0);
+  if (!den) return x1;
+  const peak = x1 - (0.5 * ((x1 - x0) ** 2 * (y1 - y2) - (x1 - x2) ** 2 * (y1 - y0))) / den;
+  return Math.min(x2, Math.max(x0, peak));
+}
+
+// The simulated depth of field racks from the old focus point to the new one.
+function focusMix() {
+  if (!focusAnim) return 1;
+  const t = Math.min(1, (performance.now() - focusAnim.t0) / focusAnim.dur);
+  if (t >= 1) { focusAnim = null; return 1; }
+  return t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2; // ease in and out
+}
+
+function setFocusPoint(pt, animate) {
+  if (animate) {
+    state.focusPrev = focusMix() > 0.5 ? state.focusPt : state.focusPrev;
+    focusAnim = { t0: performance.now(), dur: AF_SPEEDS[state.afSpeed].dof * 1000 };
+  } else {
+    state.focusPrev = pt;
+    focusAnim = null;
+  }
+  state.focusPt = pt;
+  requestRender();
 }
 
 async function focusAt(uv, cx, cy) {
-  const token = ++afToken, live = state.mode === 'live';
-  state.focusPt = uv;
+  const token = ++afToken, live = state.mode === 'live', sim = state.iris !== 'lens';
   showReticle(cx, cy);
-  if (!state.lock) state.lock = { af: false, iso: state.iso };
-  const stats = regionStats(live ? video : stillCanvas, uv);
-  if (stats) { // spot meter: expose the tapped spot as mid grey
-    state.iso = nearestIso(800 * 2 ** Math.log2(0.18 / Math.max(stats.light, 1e-4)));
-    syncHud();
-  }
-  requestRender();
-  let af = false;
+  setFocusPoint(uv, true);
+  let result = 'unsupported';
   if (live) {
     $('reticle').classList.add('hunting');
-    try { af = await contrastAF(uv, token); } catch { af = false; }
+    try { result = await smoothAF(uv, token); } catch { if (token !== afToken) return; }
   }
   if (token !== afToken) return;
-  state.lock.af = state.lock.af || af;
-  $('reticle').classList.remove('hunting');
-  $('reticle').classList.add('locked');
-  $('reticleTag').textContent = af ? 'AF·AE LOCK' : live ? 'AE LOCK' : 'FOCUS POINT';
-  $('lockText').textContent = state.lock.af ? 'AF·AE LOCK' : 'AE LOCK';
-  $('lockBadge').hidden = false;
-  if (live && !af && !focusNoteShown) {
+  const r = $('reticle');
+  r.classList.remove('hunting');
+  if (live && result === 'unsupported' && !focusNoteShown) {
     focusNoteShown = true;
-    toast('This camera doesn’t allow focus control here, so focus stays automatic. The tap set exposure.');
+    toast(sim ? 'This camera doesn’t allow focus control here. The tap moves the simulated focus.' : 'This camera doesn’t allow focus control here, so focus stays automatic.');
   }
+  if (result === 'unsupported' && !sim) { // nothing to focus: the camera keeps its own autofocus
+    $('reticleTag').textContent = 'AUTO FOCUS';
+    state.lock = null;
+    setTimeout(() => { if (token === afToken) r.hidden = true; }, 1200);
+    return;
+  }
+  state.lock = { af: result !== 'unsupported' };
+  r.classList.add('locked');
+  $('reticleTag').textContent = result === 'locked' ? 'AF LOCK' : result === 'flat' ? 'LOW CONTRAST' : 'FOCUS POINT';
+  $('lockText').textContent = state.lock.af ? 'AF LOCK' : 'FOCUS POINT';
+  $('lockBadge').hidden = false;
 }
 
 function showReticle(cx, cy) {
@@ -1418,20 +1483,18 @@ function showReticle(cx, cy) {
   r.style.animation = 'none'; void r.offsetWidth; r.style.animation = ''; // replay the pop-in
 }
 
-function resetFocus() {
+function resetFocus(animate = false) {
   afToken++;
-  if (state.lock && state.lock.iso != null) { state.iso = state.lock.iso; syncHud(); }
   state.lock = null;
-  state.focusPt = [0.5, 0.5];
+  setFocusPoint([0.5, 0.5], animate);
   $('reticle').hidden = true;
   $('lockBadge').hidden = true;
-  requestRender();
 }
 
 $('lockBadge').addEventListener('click', () => {
   const hadAf = !!(state.lock && state.lock.af);
   if (hadAf && recording) { toast('Stop recording to unlock focus.'); return; }
-  resetFocus();
+  resetFocus(true);
   if (hadAf && state.mode === 'live') startCamera({ quiet: true }); // a fresh stream brings back continuous autofocus
 });
 
@@ -1576,6 +1639,8 @@ function applySettings(s, persist) {
     if (persist) prefs.set(k, s[k]);
   }
   if (state.look === 'custom' && !customLut) state.look = 'cine';
+  state.focusPrev = state.focusPt;
+  focusAnim = null;
   syncHud(); syncLooks();
 }
 
@@ -1858,7 +1923,6 @@ $('adjRange').addEventListener('input', (e) => {
   const a = ADJ[adjusting];
   state[a.key] = a.values[+e.target.value];
   prefs.set(a.key, state[a.key]);
-  if (a.key === 'iso' && state.lock) state.lock.iso = null; // a manual ISO stays when the lock is released
   if (a.key === 'iris' && state.mode === 'still') uploadSource(stillCanvas); // rebuild the blur's mipmaps
   showAdjValue(); syncHud(); requestRender();
 });
@@ -1977,6 +2041,7 @@ function syncSettings() {
   for (const b of $('grainSeg').children) b.setAttribute('aria-checked', String(+b.dataset.v === state.grain));
   for (const b of $('resSeg').children) b.setAttribute('aria-checked', String(b.dataset.v === state.res));
   $('vigSwitch').setAttribute('aria-checked', String(state.vignette));
+  for (const b of $('afSpeedSeg').children) b.setAttribute('aria-checked', String(b.dataset.v === state.afSpeed));
   $('rotSwitch').setAttribute('aria-checked', String(state.autoRotate));
   $('rotNote').textContent = !state.autoRotate ? 'Off: shots follow the screen.'
     : motion === 'denied' ? 'Motion access is off. Allow it in Settings → Safari → Motion & Orientation Access, then reopen the app.'
@@ -1998,6 +2063,10 @@ $('resSeg').addEventListener('click', (e) => {
   const b = e.target.closest('button'); if (!b || b.dataset.v === state.res) return;
   state.res = b.dataset.v; prefs.set('res', state.res); syncSettings();
   if (state.mode === 'live' || state.mode === 'boot') startCamera();
+});
+$('afSpeedSeg').addEventListener('click', (e) => {
+  const b = e.target.closest('button'); if (!b) return;
+  state.afSpeed = b.dataset.v; prefs.set('afSpeed', state.afSpeed); syncSettings();
 });
 $('rotSwitch').addEventListener('click', () => {
   state.autoRotate = !state.autoRotate;
