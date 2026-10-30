@@ -296,7 +296,14 @@ legend { padding: 0; margin-bottom: 8px; font-weight: 600; }
 .g-dur::before { content: "▶ "; font-size: 9px; }
 .g-empty { grid-column: 1 / -1; padding: 48px 16px; text-align: center; color: var(--dim); }
 .viewer { position: absolute; inset: 0; background: #000; display: flex; flex-direction: column; padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
-.v-img { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; padding: 8px; }
+.v-img { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; padding: 8px; position: relative; overflow: hidden; }
+.v-nav {
+  position: absolute; top: 50%; width: 40px; height: 40px; margin-top: -20px; border-radius: 50%; display: grid; place-items: center;
+  background: rgba(0, 0, 0, 0.5); border: 1px solid rgba(255, 255, 255, 0.22); color: #fff;
+}
+.v-nav svg { width: 20px; height: 20px; }
+.v-nav.prev { left: max(8px, env(safe-area-inset-left, 0px)); }
+.v-nav.next { right: max(8px, env(safe-area-inset-right, 0px)); }
 .v-img img { max-width: 100%; max-height: 100%; object-fit: contain; -webkit-touch-callout: default; -webkit-user-select: auto; user-select: auto; }
 .v-img video { max-width: 100%; max-height: 100%; background: #000; }
 .v-meta { padding: 0 max(16px, env(safe-area-inset-right, 0px)) 0 max(16px, env(safe-area-inset-left, 0px)); font: 12px var(--mono); color: var(--dim); overflow-wrap: anywhere; }
@@ -479,7 +486,11 @@ legend { padding: 0; margin-bottom: 8px; font-weight: 600; }
       <div><h2 id="viewerName"></h2><span id="viewerDims"></span></div>
       <button class="btn" id="viewerBack">Back</button>
     </div>
-    <div class="v-img"><img id="viewerImg" alt=""><video id="viewerVideo" controls playsinline hidden></video></div>
+    <div class="v-img" id="viewerStage">
+      <img id="viewerImg" alt="" draggable="false"><video id="viewerVideo" controls playsinline hidden></video>
+      <button class="v-nav prev" id="viewerPrev" aria-label="Previous"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
+      <button class="v-nav next" id="viewerNext" aria-label="Next"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg></button>
+    </div>
     <p class="v-meta" id="viewerMeta"></p>
     <p class="fine v-hint" id="viewerHint" hidden>Press and hold the photo, then tap Save to Photos.</p>
     <div class="v-actions" id="viewerActions">
@@ -488,7 +499,7 @@ legend { padding: 0; margin-bottom: 8px; font-weight: 600; }
       <button class="btn" id="viewerDelete">Delete</button>
     </div>
     <div class="v-actions" id="viewerConfirm" hidden>
-      <span>Delete this photo?</span>
+      <span id="viewerConfirmText">Delete this photo?</span>
       <button class="btn" id="viewerKeep">Keep</button>
       <button class="btn danger" id="viewerDeleteYes">Delete</button>
     </div>
@@ -2907,17 +2918,25 @@ async function shotFile(rec) {
   return new File([blob], rec.name + ext, { type });
 }
 
-async function openViewer(rec) {
+// `dir` is set when moving from the shot next to this one: 1 slides it in from the right, -1 from the left.
+async function openViewer(rec, dir = 0) {
   const isVideo = rec.kind === 'video';
   const file = await shotFile(rec);
   if (!file) { toast('This clip is missing.'); return; }
-  closeViewer();
+  releaseViewerMedia();
   viewing = { rec, file, url: URL.createObjectURL(file) };
+  const el = viewerMedia();
+  if (dir) slideMedia(el, dir * $('viewerStage').clientWidth * 0.35, 0, 0); // waits off to the side
   $('viewerImg').hidden = isVideo;
   $('viewerVideo').hidden = !isVideo;
-  if (isVideo) $('viewerVideo').src = viewing.url; else $('viewerImg').src = viewing.url;
+  el.src = viewing.url;
+  if (dir && !isVideo) await el.decode().catch(() => {}); // slide in a decoded photo, not an empty frame
+  const i = viewerIndex();
   $('viewerName').textContent = rec.name;
-  $('viewerDims').textContent = rec.w + ' × ' + rec.h + (isVideo ? ' · ' + formatDuration(rec.duration) : '');
+  $('viewerDims').textContent = (i + 1) + ' of ' + shots.length + ' · ' + rec.w + ' × ' + rec.h + (isVideo ? ' · ' + formatDuration(rec.duration) : '');
+  $('viewerPrev').hidden = i <= 0;
+  $('viewerNext').hidden = i < 0 || i >= shots.length - 1;
+  $('viewerConfirmText').textContent = isVideo ? 'Delete this video?' : 'Delete this photo?';
   $('viewerMeta').innerHTML = '';
   const s = rec.settings || {};
   const label = (list, id) => (list.find((x) => x.id === id) || {}).label || '';
@@ -2936,27 +2955,105 @@ async function openViewer(rec) {
   $('viewerActions').hidden = false;
   $('viewerConfirm').hidden = true;
   $('viewer').hidden = false;
+  if (dir) slideMedia(el, 0, 1, 200);
 }
-function closeViewer() {
+function releaseViewerMedia() {
   if (viewing) URL.revokeObjectURL(viewing.url);
   viewing = null;
-  $('viewer').hidden = true;
   $('viewerImg').removeAttribute('src');
   $('viewerVideo').pause();
   $('viewerVideo').removeAttribute('src');
   $('viewerVideo').load();
+  for (const el of [$('viewerImg'), $('viewerVideo')]) slideMedia(el, 0, 1, 0);
 }
+function closeViewer() {
+  releaseViewerMedia();
+  $('viewer').hidden = true;
+}
+
+/* Moving through the roll from the viewer: swipe, the arrow buttons, or a keyboard's arrow keys.
+   Shots run in roll order, newest first, so swiping left (or Next) goes to an older one. */
+const viewerMedia = () => (viewing && viewing.rec.kind === 'video' ? $('viewerVideo') : $('viewerImg'));
+const viewerIndex = () => (viewing ? shots.findIndex((s) => s.id === viewing.rec.id) : -1);
+const calmMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+function slideMedia(el, x, opacity, ms) {
+  if (calmMotion()) ms = 0;
+  el.style.transition = ms ? `transform ${ms}ms ease-out, opacity ${ms}ms ease-out` : 'none';
+  el.style.transform = x ? `translateX(${x}px)` : '';
+  el.style.opacity = opacity === 1 ? '' : opacity;
+  if (!ms) void el.offsetWidth; // apply now, so a following slide animates from here
+  return new Promise((res) => setTimeout(res, ms));
+}
+let viewerMoving = false;
+async function stepViewer(dir) {
+  if (!viewing || viewerMoving) return;
+  const next = shots[viewerIndex() + dir], el = viewerMedia();
+  if (!next) { slideMedia(el, 0, 1, 180); return; } // at either end it springs back
+  viewerMoving = true;
+  try {
+    await slideMedia(el, -dir * $('viewerStage').clientWidth, 0, 160);
+    await openViewer(next, dir);
+  } finally {
+    viewerMoving = false;
+  }
+}
+$('viewerPrev').addEventListener('click', () => stepViewer(-1));
+$('viewerNext').addEventListener('click', () => stepViewer(1));
+document.addEventListener('keydown', (e) => {
+  if ($('viewer').hidden || !viewing || e.target === $('viewerVideo')) return;
+  if (e.key === 'ArrowRight') stepViewer(1);
+  else if (e.key === 'ArrowLeft') stepViewer(-1);
+  else return;
+  e.preventDefault();
+});
+
+// The shot follows a horizontal drag; a long or quick enough swipe moves on, otherwise it springs back.
+let swipe = null;
+$('viewerStage').addEventListener('touchstart', (e) => {
+  swipe = null;
+  if (e.touches.length !== 1 || !viewing || viewerMoving || e.target.closest('.v-nav')) return;
+  const t = e.touches[0];
+  if (viewing.rec.kind === 'video' && t.clientY > $('viewerVideo').getBoundingClientRect().bottom - 64) return; // the video's own controls
+  swipe = { x: t.clientX, y: t.clientY, start: performance.now(), dx: 0, axis: '' };
+}, { passive: true });
+$('viewerStage').addEventListener('touchmove', (e) => {
+  if (!swipe) return;
+  if (e.touches.length !== 1) { slideMedia(viewerMedia(), 0, 1, 180); swipe = null; return; }
+  const t = e.touches[0], dx = t.clientX - swipe.x, dy = t.clientY - swipe.y;
+  if (!swipe.axis) {
+    if (Math.hypot(dx, dy) < 10) return;
+    swipe.axis = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y';
+  }
+  if (swipe.axis !== 'x') return;
+  e.preventDefault();
+  swipe.dx = dx;
+  const i = viewerIndex(), end = dx > 0 ? i <= 0 : i >= shots.length - 1;
+  slideMedia(viewerMedia(), end ? dx * 0.3 : dx, 1, 0); // resists past either end
+}, { passive: false });
+function endSwipe(cancelled) {
+  if (!swipe) return;
+  const { dx, start, axis } = swipe;
+  swipe = null;
+  if (axis !== 'x') return;
+  const fast = Math.abs(dx) > 30 && Math.abs(dx) / Math.max(1, performance.now() - start) > 0.45;
+  if (!cancelled && (Math.abs(dx) > $('viewerStage').clientWidth * 0.22 || fast)) stepViewer(dx < 0 ? 1 : -1);
+  else slideMedia(viewerMedia(), 0, 1, 180);
+}
+$('viewerStage').addEventListener('touchend', () => endSwipe(false));
+$('viewerStage').addEventListener('touchcancel', () => endSwipe(true));
 $('viewerBack').addEventListener('click', closeViewer);
 $('viewerSave').addEventListener('click', () => { if (viewing) saveToDevice(viewing.file); });
 $('viewerRegrade').addEventListener('click', () => { if (viewing) startRegrade(viewing.rec); });
 $('viewerDelete').addEventListener('click', () => { $('viewerActions').hidden = true; $('viewerConfirm').hidden = false; });
 $('viewerKeep').addEventListener('click', () => { $('viewerActions').hidden = false; $('viewerConfirm').hidden = true; });
+// After a delete the viewer shows the next shot along, like Photos; the last one returns to the roll.
 $('viewerDeleteYes').addEventListener('click', async () => {
   if (!viewing) return;
-  const { rec } = viewing;
-  closeViewer();
+  const { rec } = viewing, i = viewerIndex();
   await deleteShot(rec);
   updateRoll(); renderGrid();
+  const next = shots[Math.min(i, shots.length - 1)];
+  if (next) openViewer(next); else closeViewer();
 });
 
 /* Lifecycle */

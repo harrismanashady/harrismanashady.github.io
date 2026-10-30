@@ -21,7 +21,7 @@ A camera web app for iPhone that shoots photos and video with the look of a RED 
 - **RAW-style re-grading.** Every shot keeps its ungraded frame, so you can reopen it from the roll and change ISO, white balance, look, contrast and roll-off afterwards, the way REDCODE RAW clips stay adjustable in post.
 - **Your own LUTs.** Import any 3D `.cube` LUT and say what it was made for: RED Log3G10 / REDWideGamutRGB (LUTs for RED footage), Apple Log, or normal Rec.709 video. Are.Es Cam converts the camera feed into that format before the LUT.
 - **Camera controls:** ISO (exposure, base 800), white balance in Kelvin, frame crops (17:9, 2.39:1, 1.85:1, 16:9, full), false-color exposure view, film grain and lens vignette.
-- **Roll.** Photos and videos are named like cinema clips (`A001_C0001_20261026.jpg`), stay on the phone, and save to Photos through the share sheet. Tap Select to pick several (or Select all), then Save to Photos to share them in one go, or Delete to remove them from the app after a confirmation.
+- **Roll.** Photos and videos are named like cinema clips (`A001_C0001_20261026.jpg`), stay on the phone, and save to Photos through the share sheet. Tap a shot to view it, then swipe left or right (or use the arrow buttons) to move through the roll; after deleting one, the next one along shows. Tap Select to pick several (or Select all), then Save to Photos to share them in one go, or Delete to remove them from the app after a confirmation.
 - **Grade existing photos** from your library with any look.
 - Works offline after the first visit.
 
