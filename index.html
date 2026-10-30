@@ -27,6 +27,7 @@
   --af: #ffd84a;
   --ai: #63e2a6;
   --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+  --card: #ececea;         /* instant print card */
   --sans: -apple-system, BlinkMacSystemFont, system-ui, "Helvetica Neue", Arial, sans-serif;
   color-scheme: dark;
 }
@@ -68,6 +69,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--rec); outli
 .view { grid-area: view; position: relative; display: flex; align-items: center; justify-content: center; overflow: hidden; background: #000; touch-action: none; }
 #screen { position: absolute; left: 50%; top: 50%; display: block; background: #000; transform: translate(-50%, -50%) rotate(var(--vf-rot, 0deg)); }
 [data-mode="boot"] #screen, [data-mode="nocam"] #screen { visibility: hidden; }
+#screen.carded { box-sizing: content-box; border-style: solid; border-color: var(--card); box-shadow: 0 4px 24px rgba(0, 0, 0, 0.5); }
 .cam-feed { position: absolute; width: 2px; height: 2px; opacity: 0; pointer-events: none; }
 .flash { position: absolute; inset: 0; background: #fff; opacity: 0; pointer-events: none; }
 .flash.on { animation: flash 0.32s ease-out; }
@@ -93,7 +95,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--rec); outli
 /* Adjust panel (ISO, WB) */
 .adjust {
   position: absolute; left: max(12px, env(safe-area-inset-left, 0px)); right: max(12px, env(safe-area-inset-right, 0px)); bottom: 12px;
-  margin-inline: auto; max-width: 460px; background: rgba(16, 16, 18, 0.94); border: 1px solid var(--line);
+  margin-inline: auto; max-width: 460px; background: rgba(16, 16, 18, 0.97); border: 1px solid var(--line);
   border-radius: 14px; padding: 12px 16px 10px;
 }
 .adj-top { display: flex; align-items: baseline; gap: 10px; }
@@ -243,6 +245,12 @@ input[type="range"]::-moz-range-thumb { width: 18px; height: 18px; border-radius
 .seg { display: flex; background: var(--ink); border: 1px solid var(--line); border-radius: 9px; padding: 2px; }
 .seg button { padding: 6px 10px; border-radius: 7px; font-size: 13px; color: var(--dim); }
 .seg button[aria-checked="true"] { background: var(--raise); color: var(--text); }
+.fx-top { margin-top: 12px; }
+.fx-grid { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.fx-grid button { padding: 6px 11px; border-radius: 999px; border: 1px solid var(--line); background: var(--ink); color: var(--dim); font-size: 13px; }
+.fx-grid button[aria-checked="true"] { background: var(--text); border-color: var(--text); color: var(--ink); }
+.fx-badge { color: var(--af); border-color: var(--af); }
+.fx-badge b { font-weight: 400; font-size: 14px; line-height: 1; }
 .switch { width: 50px; height: 30px; border-radius: 15px; background: var(--line); position: relative; transition: background 0.2s; flex: none; }
 .switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 24px; height: 24px; border-radius: 50%; background: var(--text); transition: transform 0.2s; }
 .switch[aria-checked="true"] { background: var(--rec); }
@@ -360,6 +368,15 @@ legend { padding: 0; margin-bottom: 8px; font-weight: 600; }
         </div>
       </div>
     </div>
+    <div class="adjust colour-panel" id="instantPanel" hidden>
+      <div class="adj-top"><span class="adj-label" id="ipLabel">Instant frame</span><span class="adj-value" id="ipName">Mini</span></div>
+      <p class="adj-note">Photos come out as an instant print: a white card, with the wide strip at the bottom. Videos aren’t framed.</p>
+      <div class="seg" id="ipFrame" role="radiogroup" aria-labelledby="ipLabel">
+        <button role="radio" data-v="off">Off</button><button role="radio" data-v="mini">Mini</button><button role="radio" data-v="square">Square</button><button role="radio" data-v="wide">Wide</button>
+      </div>
+      <div class="adj-top fx-top"><span class="adj-label" id="ipFxLabel">Effect</span><span class="adj-sub" id="ipFxNote"></span></div>
+      <div class="fx-grid" id="ipFx" role="radiogroup" aria-labelledby="ipFxLabel"></div>
+    </div>
     <div class="reticle" id="reticle" hidden><span id="reticleTag">AF</span></div>
     <div class="lenses" id="lenses" role="radiogroup" aria-label="Zoom" hidden></div>
     <div class="zoom-readout" id="zoomReadout" hidden>1×</div>
@@ -367,6 +384,7 @@ legend { padding: 0; margin-bottom: 8px; font-weight: 600; }
     <button class="lock-badge" id="lockBadge" hidden aria-label="Unlock focus"><span id="lockText">AF LOCK</span><b aria-hidden="true">×</b></button>
     <div class="view-tools">
       <button class="tool-btn hdr-btn" id="hdrBtn" data-level="off" aria-label="HDR off">HDR OFF</button>
+      <button class="tool-btn fx-badge" id="fxBadge" hidden aria-label="Discard the first shot"><span id="fxBadgeText">1 OF 2</span><b aria-hidden="true">×</b></button>
       <button class="tool-btn timer-btn" id="timerBtn" data-on="false" aria-label="Timer off">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="13.5" r="7.5"/><path d="M12 13.5V9.5M9.5 3h5"/></svg><span id="timerText">OFF</span>
       </button>
@@ -549,7 +567,7 @@ const HDR_LABELS = { off: 'HDR OFF', natural: 'HDR', strong: 'HDR+' };
 // Simulated iris. 'lens' leaves the lens as it is; an f-stop adds depth-of-field blur.
 const IRIS = [1.4, 2, 2.8, 4, 5.6, 8, 'lens'];
 // Settings a shot remembers so it can be re-graded later, like a RAW clip.
-const GRADE_KEYS = ['look', 'iso', 'kelvin', 'frame', 'grain', 'vignette', 'contrast', 'rolloff', 'iris', 'focusPt', 'oneHue', 'oneRange', 'skin', 'hdr'];
+const GRADE_KEYS = ['look', 'iso', 'kelvin', 'frame', 'grain', 'vignette', 'contrast', 'rolloff', 'iris', 'focusPt', 'oneHue', 'oneRange', 'skin', 'hdr', 'instantFrame', 'instantFx'];
 
 const state = {
   mode: 'boot',            // boot | live | still | nocam
@@ -578,6 +596,8 @@ const state = {
   afSpeed: prefs.get('afSpeed', 'medium'),
   oneHue: prefs.get('oneHue', 'red'),      // the color One Colour keeps
   oneRange: prefs.get('oneRange', 'medium'),
+  instantFrame: prefs.get('instantFrame', 'mini'), // Instant's print border: off | mini | square | wide
+  instantFx: prefs.get('instantFx', 'normal'),       // Instant's effect, an INSTANT_FX id
   lock: null,              // {af} while focus is locked by a tap
   falseColor: false,
   editing: null,           // shot being re-graded from its source frame
@@ -655,6 +675,13 @@ const LOOKS = [
   { id: 'neon', name: 'Neon & Glow', contrast: 1.5, mid: 0.15, white: 7, perChannel: 0.3, sat: 1.2, wb: [1, 0.97, 1.05], glow: 0.6,
     hues: [{ h: 142, w: 36, shift: 42, sat: 0.95 }, { h: 110, w: 22, shift: -30, sat: 1.1 }, { h: 264, w: 34, shift: 30, sat: 1.25 }, { h: 195, w: 26, shift: 4, sat: 1.3 }, { h: 330, w: 34, shift: 0, sat: 1.3 }, { h: 29, w: 16, shift: -12, sat: 1.15 }, { h: 55, w: 16, shift: 0, sat: 0.86 }],
     shadow: [0.014, -0.012, 0.045], high: [0.012, -0.004, 0.02], lift: -0.012 },
+  // Instant film: soft contrast, milky lifted blacks, bright creamy highlights, cool cyan shadows and
+  // pastel color, greens toward teal and skin a touch pink. A gentle diffusion (low-threshold glow)
+  // and the corner falloff of a small flash lens.
+  { id: 'instant', name: 'Instant', contrast: 1.0, mid: 0.22, white: 4.5, perChannel: 0.5, sat: 0.86, wb: [0.96, 1.01, 1.05],
+    glow: 0.18, glowKnee: [0.6, 2.4], vignette: 0.45,
+    hues: [{ h: 142, w: 34, shift: 22, sat: 0.8 }, { h: 264, w: 34, shift: -18, sat: 0.88 }, { h: 110, w: 22, shift: -10, sat: 0.8 }, { h: 55, w: 18, shift: -6, sat: 1.06 }, { h: 29, w: 16, shift: -6, sat: 1.04 }],
+    shadow: [-0.045, 0.02, 0.05], high: [0.03, 0.018, -0.02], lift: 0.13 },
   { id: 'bleach', name: 'Bleach', contrast: 1.85, mid: 0.15, white: 6, perChannel: 0.3, sat: 0.52, wb: [0.98, 1, 1.02],
     hues: [], shadow: [-0.006, 0, 0.01], high: [0, 0, 0], lift: 0 },
   { id: 'noir', name: 'Noir', contrast: 1.6, mid: 0.16, white: 6, perChannel: 0, sat: 0, wb: [1, 1, 1], mono: [0.5, 0.42, 0.08],
@@ -676,6 +703,34 @@ const ONE_COLOURS = [
   { id: 'purple', name: 'Purple', css: '#8b46e8' }, { id: 'pink', name: 'Pink', css: '#ea4a9a' },
 ];
 const ONE_RANGES = { narrow: 10, medium: 17, wide: 30 };
+
+// Instant print formats, measured from real prints in mm: the picture (short side `mm`, long side / short side
+// `ratio`, turned to how the phone is held), the card's border on each side, its corner radius, and the seam
+// across the strip under the picture. Borders are stored as fractions of the picture's short side.
+const INSTANT_FRAMES = Object.fromEntries(Object.entries({
+  mini: { name: 'Mini', long: 62, short: 46, side: 4, top: 7.2, bottom: 15.5 },
+  square: { name: 'Square', long: 62, short: 62, side: 5, top: 7, bottom: 17 },
+  wide: { name: 'Wide', long: 99, short: 62, side: 4.5, top: 7, bottom: 17 },
+}).map(([id, f]) => [id, { name: f.name, ratio: f.long / f.short, mm: f.short, side: f.side / f.short, top: f.top / f.short, bottom: f.bottom / f.short, corner: 1.2 / f.short, seam: (f.bottom * 0.25) / f.short }]));
+// Instant's lens effects, as on instant cameras with digital effects. Their order is the shader's FX.
+// Double Exposure and Half-Frame take two shots: the first press keeps a frame, the second makes the photo.
+const INSTANT_FX = [
+  { id: 'normal', name: 'Normal' }, { id: 'vignette', name: 'Vignette' }, { id: 'soft', name: 'Soft Focus', mips: true },
+  { id: 'blur', name: 'Blur', mips: true }, { id: 'fisheye', name: 'Fisheye' }, { id: 'shift', name: 'Color Shift' },
+  { id: 'leak', name: 'Light Leak' }, { id: 'mirror', name: 'Mirror' }, { id: 'double', name: 'Double Exposure', twoShot: true },
+  { id: 'halfframe', name: 'Half-Frame', twoShot: true },
+];
+// The effect in use: Instant's, except the two-shot ones in video.
+function instantFx() {
+  const fx = state.look === 'instant' && INSTANT_FX.find((f) => f.id === state.instantFx);
+  return !fx || (fx.twoShot && state.mode === 'live' && state.capture === 'video') ? INSTANT_FX[0] : fx;
+}
+
+// The print format in use: Instant with a frame chosen, for photos (videos aren't framed).
+function instantFrame() {
+  if (state.look !== 'instant' || (state.mode === 'live' && state.capture === 'video')) return null;
+  return INSTANT_FRAMES[state.instantFrame] || null;
+}
 const oneColour = () => ONE_COLOURS.find((c) => c.id === state.oneHue) || ONE_COLOURS[0];
 function hueOf(css) {
   const [, A, B] = toOklab(...[1, 3, 5].map((i) => srgbToLin(parseInt(css.slice(i, i + 2), 16) / 255)));
@@ -880,6 +935,12 @@ uniform float uGlow;       // Neon & Glow: strength of the bloom around bright l
 uniform vec3 uGlowLod;     // mip levels (in source pixels) for the tight, medium and wide glow
 uniform sampler2D uGlowTex; // bright light from the glow pass, a quarter of the source size, with mipmaps
 uniform float uGlowScale;  // undoes the glow pass's storage scale
+uniform vec4 uCrop;        // the frame's crop of the source (shared with the vertex shader)
+uniform int uFxTurn;       // quarter turns clockwise that make the source upright, so effects follow the photo's up
+uniform float uFxMirror;   // 1 when the picture is mirrored (front camera live view)
+uniform sampler2D uFirst;  // Double Exposure and Half-Frame: the first shot, upright
+uniform vec4 uFirstCrop;   // the frame's crop of the first shot
+uniform float uFirstOn;    // 1 once the first shot is taken
 out vec4 outColor;
 
 const mat3 M709to2020 = mat3(
@@ -913,56 +974,125 @@ const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
 
 // Bright light spread over about 2^lod source pixels. Eight taps on a ring one texel of that mip
 // level out smooth away its blockiness.
-vec3 glowAt(float lod) {
+vec3 glowAt(vec2 uv, float lod) {
   vec2 texel = exp2(lod) / uTexSize;
   float l = max(lod - 2.0, 0.0); // the glow texture is a quarter of the source size
-  vec3 acc = textureLod(uGlowTex, vSrc, l).rgb;
+  vec3 acc = textureLod(uGlowTex, uv, l).rgb;
   for (int i = 0; i < 8; i++) {
     float a = float(i) * 0.78539816 + 0.3926991;
-    acc += textureLod(uGlowTex, vSrc + vec2(cos(a), sin(a)) * texel, l).rgb;
+    acc += textureLod(uGlowTex, uv + vec2(cos(a), sin(a)) * texel, l).rgb;
   }
   return acc * (uGlowScale / 9.0);
 }
 
+// The frame averaged softly over about 2^lod source pixels, from its mipmaps (Soft Focus, Blur).
+vec3 softAt(vec2 uv, float lod) {
+  vec2 texel = exp2(lod) / uTexSize;
+  vec3 acc = fetchLin(uv, lod);
+  for (int i = 0; i < 8; i++) {
+    float a = float(i) * 0.78539816 + 0.3926991;
+    acc += fetchLin(uv + vec2(cos(a), sin(a)) * texel, lod);
+  }
+  return acc / 9.0;
+}
+
+// Positions in the upright picture (0..1 across the frame, y down), to and from source positions.
+vec2 toUp(vec2 s) {
+  vec2 q = (s - uCrop.xy) / uCrop.zw;
+  if (uFxMirror > 0.5) q.x = 1.0 - q.x;
+  if (uFxTurn == 1) return vec2(1.0 - q.y, q.x);
+  if (uFxTurn == 2) return 1.0 - q;
+  if (uFxTurn == 3) return vec2(q.y, 1.0 - q.x);
+  return q;
+}
+vec2 fromUp(vec2 u) {
+  vec2 q = u;
+  if (uFxTurn == 1) q = vec2(u.y, 1.0 - u.x);
+  else if (uFxTurn == 2) q = 1.0 - u;
+  else if (uFxTurn == 3) q = vec2(1.0 - u.y, u.x);
+  if (uFxMirror > 0.5) q.x = 1.0 - q.x;
+  return uCrop.xy + q * uCrop.zw;
+}
+vec2 upPx() { vec2 p = uCrop.zw * uTexSize; return uFxTurn == 1 || uFxTurn == 3 ? p.yx : p; } // upright size in source pixels
+float upRadius(vec2 u) { vec2 p = upPx(); return length((u - 0.5) * p) / (length(p) * 0.5); } // 0 at the centre, 1 at the corners
+vec3 firstLin(vec2 u) { return restoreHighlights(srgbToLin(texture(uFirst, uFirstCrop.xy + u * uFirstCrop.zw).rgb)); }
+
 void main() {
+  // Instant's effects that move the picture: Fisheye bends it into a circle, Mirror reflects its top
+  // half, Half-Frame stacks the middle bands of two shots. Everything below samples the frame at src.
+  vec2 up0 = toUp(vSrc), up = up0, src = vSrc;
+  float fxMask = 1.0;    // Fisheye's black surround, Half-Frame's dividing line
+  bool fromFirst = false;
+  if (FX == 4) {
+    vec2 p = upPx(), d = (up - 0.5) * p;
+    float r = length(d) / (length(p) * 0.43);
+    fxMask = 1.0 - smoothstep(0.985, 1.005, r);
+    up = 0.5 + d * (0.62 + 0.38 * r * r) / p; // the middle swells, the edge stays put
+    src = fromUp(up);
+  } else if (FX == 7 && up.y > 0.5) {
+    up.y = 1.0 - up.y;
+    src = fromUp(up);
+  } else if (FX == 9) {
+    fxMask = smoothstep(0.003, 0.0045, abs(up.y - 0.5));
+    fromFirst = up.y < 0.5 && uFirstOn > 0.5;
+    up.y += up.y < 0.5 ? 0.25 : -0.25;
+    src = fromUp(up);
+  }
+
   // Simulated depth of field: a disc blur that grows with distance from the focus point.
   // It runs in linear light, after highlights are restored, so bright points bloom into bokeh.
   float rad = 0.0;
   if (uBlurPx > 0.5) {
     // Racking focus: the old subject softens while the new one sharpens.
-    float dNew = length((vSrc - uFocusPt) * uTexSize) / uCropShortPx;
-    float dOld = length((vSrc - uFocusPrev) * uTexSize) / uCropShortPx;
+    float dNew = length((src - uFocusPt) * uTexSize) / uCropShortPx;
+    float dOld = length((src - uFocusPrev) * uTexSize) / uCropShortPx;
     rad = uBlurPx * mix(smoothstep(0.14, 0.7, dOld), smoothstep(0.14, 0.7, dNew), uFocusMix);
   }
   vec3 lin;
   if (rad > 0.75) {
     vec3 acc = vec3(0.0);
-    float spin = hash(floor(vSrc * uTexSize)) * 6.2831853; // per-pixel rotation turns banding into fine noise
+    float spin = hash(floor(src * uTexSize)) * 6.2831853; // per-pixel rotation turns banding into fine noise
     float lod = max(0.0, log2(rad * 0.35));                  // pre-shrunk samples match the spacing between taps
     for (int i = 0; i < 32; i++) {
       float fi = float(i) + 0.5;
       float a = fi * 2.39996323 + spin;
-      acc += fetchLin(vSrc + vec2(cos(a), sin(a)) * (sqrt(fi / 32.0) * rad) / uTexSize, lod);
+      acc += fetchLin(src + vec2(cos(a), sin(a)) * (sqrt(fi / 32.0) * rad) / uTexSize, lod);
     }
     lin = acc / 32.0;
   } else {
-    lin = fetchLin(vSrc, 0.0);
+    lin = fetchLin(src, 0.0);
   }
   if (uSnapMix > 0.0) lin = mix(lin, restoreHighlights(srgbToLin(texture(uSnap, vSnap).rgb)), uSnapMix);
+
+  // Instant's effects on the light itself.
+  if (fromFirst) {
+    lin = firstLin(up);
+  } else if (FX == 2) { // Soft Focus: a soft copy laid over the sharp picture, its highlights blooming
+    vec3 s = softAt(src, uHdrLod.x);
+    lin = mix(lin, s, 0.45) + max(s - 0.45, 0.0) * 0.7;
+  } else if (FX == 3) { // Blur: sharp in the middle, softening toward the edges
+    float l = uHdrLod.y * smoothstep(0.2, 0.95, upRadius(up0));
+    if (l > 0.3) lin = softAt(src, l);
+  } else if (FX == 5) { // Color Shift: red and blue drift apart, toward opposite sides
+    vec2 o = fromUp(up + vec2(0.011, 0.0)) - src;
+    lin.r = fetchLin(src + o, 0.0).r;
+    lin.b = fetchLin(src - o, 0.0).b;
+  }
+  if (FX == 8 && uFirstOn > 0.5) lin = (lin + firstLin(up)) * 0.62; // Double Exposure: both shots add their light
 
   // HDR tone mapping: pull large-scale brightness toward mid grey, so bright skies come down and
   // shadows open up, while local detail stays. The base brightness blends two blur sizes; near a
   // strong edge the smaller one takes over, which keeps bright and dark areas from haloing.
   if (uHdr > 0.0) {
     float l0 = log2(max(dot(lin, LUMA), 1e-5));
-    float fine = log2(max(dot(fetchLin(vSrc, uHdrLod.x), LUMA), 1e-5));
-    float coarse = log2(max(dot(fetchLin(vSrc, uHdrLod.y), LUMA), 1e-5));
+    float fine = log2(max(dot(fetchLin(src, uHdrLod.x), LUMA), 1e-5));
+    float coarse = log2(max(dot(fetchLin(src, uHdrLod.y), LUMA), 1e-5));
     float base = mix(fine, coarse, exp(-0.5 * (l0 - coarse) * (l0 - coarse)));
     lin *= exp2(clamp(-uHdr * (base - log2(0.18)), -2.5, 2.5));
   }
   lin *= uWB * uExposure;
   if (uGlow > 0.0) {
-    vec3 g = 0.3 * glowAt(uGlowLod.x) + 0.4 * glowAt(uGlowLod.y) + 0.3 * glowAt(uGlowLod.z);
+    vec3 g = fromFirst ? vec3(0.0) : 0.3 * glowAt(src, uGlowLod.x) + 0.4 * glowAt(src, uGlowLod.y) + 0.3 * glowAt(src, uGlowLod.z);
     lin += uGlow * max(mix(vec3(dot(g, LUMA)), g, 1.3), 0.0); // neon glows in its own color, a little richer
   }
   vec3 enc;
@@ -981,7 +1111,7 @@ void main() {
   // People: where the AI found skin, use the natural rendering, a touch brighter and with less grain.
   float skin = 0.0;
   if (uSkin > 0.5) {
-    skin = texture(uMask, (vSrc - uMaskCrop.xy) / uMaskCrop.zw).r;
+    skin = fromFirst ? 0.0 : texture(uMask, (src - uMaskCrop.xy) / uMaskCrop.zw).r;
     if (skin > 0.003) {
       vec3 w = M709toRWG * lin;
       vec3 e = clamp(vec3(log3g10(w.r), log3g10(w.g), log3g10(w.b)), 0.0, 1.0);
@@ -995,12 +1125,22 @@ void main() {
   float r = length(q) / length(vec2(uAspect, 1.0) * 0.5);
   o *= 1.0 - uVignette * 0.32 * pow(r, 2.4);
 
+  if (FX == 1) { // Vignette: a deep, round falloff to dark corners
+    o *= mix(1.0, 0.12, smoothstep(0.3, 1.05, upRadius(up0)));
+  } else if (FX == 6) { // Light Leak: warm light washing in from one edge, brightest in a streak, and a glow in a corner
+    float streak = exp(-pow((up0.x - 0.13) / 0.05, 2.0)) * (0.65 + 0.35 * sin(up0.y * 4.0 + 1.0));
+    float edge = exp(-up0.x / 0.07) + 0.55 * exp(-length((up0 - vec2(1.0, 0.0)) * vec2(1.0, 1.4)) / 0.22);
+    vec3 leak = mix(vec3(0.95, 0.32, 0.08), vec3(1.0, 0.82, 0.45), clamp(streak, 0.0, 1.0)) * clamp(streak + edge * 0.8, 0.0, 1.0);
+    o = 1.0 - (1.0 - o) * (1.0 - leak * 0.9); // screened on, as light adds to film
+  }
+
   if (uGrain > 0.0) {
     vec2 cell = floor(vFrame * vec2(1500.0 * uAspect, 1500.0));
     float n = hash(cell + uSeed) + hash(cell * 1.37 + uSeed * 1.71) - 1.0;
     float y = dot(o, vec3(0.2126, 0.7152, 0.0722));
     o += n * uGrain * 0.055 * (0.35 + 2.6 * y * (1.0 - y)) * (1.0 - 0.6 * skin);
   }
+  o *= fxMask;
 
   if (uFalseColor > 0.5) {
     float y = dot(clamp(o, 0.0, 1.0), vec3(0.2126, 0.7152, 0.0722));
@@ -1024,16 +1164,12 @@ function initGL() {
     if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
     return s;
   };
-  const prog = gl.createProgram();
-  gl.attachShader(prog, compile(gl.VERTEX_SHADER, VS));
-  gl.attachShader(prog, compile(gl.FRAGMENT_SHADER, FS));
-  gl.linkProgram(prog);
-  if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
-  GL.prog = prog;
-  GL.u = {};
-  for (const name of ['uCrop', 'uFlip', 'uTurn', 'uImage', 'uLut', 'uLutSize', 'uLutMin', 'uLutMax', 'uInput', 'uExpandA', 'uExposure', 'uWB', 'uGrain', 'uSeed', 'uAspect', 'uVignette', 'uFalseColor', 'uFocusPt', 'uFocusPrev', 'uFocusMix', 'uTexSize', 'uCropShortPx', 'uBlurPx', 'uSnap', 'uSnapCrop', 'uSnapMix', 'uMask', 'uMaskCrop', 'uSkin', 'uSkinLut', 'uSkinLutSize', 'uHdr', 'uHdrLod', 'uGlow', 'uGlowLod', 'uGlowTex', 'uGlowScale']) {
-    GL.u[name] = gl.getUniformLocation(prog, name);
-  }
+  GL.compile = compile;
+  GL.vs = compile(gl.VERTEX_SHADER, VS);
+  GL.variants = new Map();
+  const { prog, u } = programFor(0);
+  GL.prog = prog; // the program without effects
+  GL.u = u;
   GL.vao = gl.createVertexArray();
   gl.bindVertexArray(GL.vao);
   const buf = gl.createBuffer();
@@ -1047,7 +1183,7 @@ function initGL() {
   gl.bindTexture(gl.TEXTURE_2D, GL.frameTex);
   for (const [k, v] of [[gl.TEXTURE_MIN_FILTER, gl.LINEAR], [gl.TEXTURE_MAG_FILTER, gl.LINEAR], [gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE], [gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE]]) gl.texParameteri(gl.TEXTURE_2D, k, v);
   // The held frame for lens cross-fades, and the AI skin mask (one channel).
-  for (const name of ['snapTex', 'maskTex']) {
+  for (const name of ['snapTex', 'maskTex', 'firstTex']) {
     GL[name] = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, GL[name]);
     for (const [k, v] of [[gl.TEXTURE_MIN_FILTER, gl.LINEAR], [gl.TEXTURE_MAG_FILTER, gl.LINEAR], [gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE], [gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE]]) gl.texParameteri(gl.TEXTURE_2D, k, v);
@@ -1070,6 +1206,22 @@ function initGL() {
   GL.floatGlow = !!(gl.getExtension('EXT_color_buffer_float') || gl.getExtension('EXT_color_buffer_half_float'));
   GL.glow = null;
   return true;
+}
+
+// The main program for an Instant effect (0 = none). Each effect is compiled into its own program with FX
+// set, so a shader carries only the code it runs; they are built the first time they're needed.
+const MAIN_UNIFORMS = ['uCrop', 'uFlip', 'uTurn', 'uImage', 'uLut', 'uLutSize', 'uLutMin', 'uLutMax', 'uInput', 'uExpandA', 'uExposure', 'uWB', 'uGrain', 'uSeed', 'uAspect', 'uVignette', 'uFalseColor', 'uFocusPt', 'uFocusPrev', 'uFocusMix', 'uTexSize', 'uCropShortPx', 'uBlurPx', 'uSnap', 'uSnapCrop', 'uSnapMix', 'uMask', 'uMaskCrop', 'uSkin', 'uSkinLut', 'uSkinLutSize', 'uHdr', 'uHdrLod', 'uGlow', 'uGlowLod', 'uGlowTex', 'uGlowScale', 'uFxTurn', 'uFxMirror', 'uFirst', 'uFirstCrop', 'uFirstOn'];
+function programFor(fx) {
+  if (GL.variants.has(fx)) return GL.variants.get(fx);
+  const prog = gl.createProgram();
+  gl.attachShader(prog, GL.vs);
+  gl.attachShader(prog, GL.compile(gl.FRAGMENT_SHADER, FS.replace('#version 300 es', '#version 300 es\n#define FX ' + fx)));
+  gl.bindAttribLocation(prog, 0, 'aPos');
+  gl.linkProgram(prog);
+  if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
+  const v = { fx, prog, u: Object.fromEntries(MAIN_UNIFORMS.map((n) => [n, gl.getUniformLocation(prog, n)])) };
+  GL.variants.set(fx, v);
+  return v;
 }
 
 function makeLutTexture(size, data) {
@@ -1122,8 +1274,8 @@ function sourceSize() {
 }
 
 function geometryFor(sw, sh, zoom = 1) {
-  const frame = FRAMES.find((f) => f.id === state.frame) || FRAMES[0];
-  let target = frame.ratio ? (sw >= sh ? frame.ratio : 1 / frame.ratio) : sw / sh;
+  const ratio = (instantFrame() || FRAMES.find((f) => f.id === state.frame) || FRAMES[0]).ratio;
+  let target = ratio ? (sw >= sh ? ratio : 1 / ratio) : sw / sh;
   let cw = sw, ch = sh;
   if (sw / sh > target) cw = sh * target; else ch = sw / target;
   const frameW = Math.round(cw), frameH = Math.round(ch); // the frame before zoom: sizes the view and recordings
@@ -1136,13 +1288,31 @@ function computeGeometry() {
   geo = size ? geometryFor(size[0], size[1], state.mode === 'live' ? lensCrop() : 1) : null;
 }
 
+// Instant's card round the viewfinder: border widths [top, right, bottom, left] on screen, as fractions
+// of the picture's short side. The wide strip goes on the side that will be the bottom of the saved
+// photo, which depends on how the phone is held.
+function cardBorders() {
+  const f = instantFrame();
+  if (!f) return null;
+  const upright = [f.top, f.side, f.bottom, f.side], k = (state.mode === 'live' ? captureTurn() : 0) / 90;
+  return [0, 1, 2, 3].map((side) => upright[(side + k) % 4]); // a clockwise turn moves each side to the next one round
+}
+
 function layout() {
   computeGeometry();
   if (!geo) return;
   $('reticle').hidden = true; // its screen position no longer matches the picture
   const view = $('view'), vw = view.clientWidth, vh = view.clientHeight;
+  const card = cardBorders();
   let w = vw, h = vw / geo.aspect;
-  if (h > vh) { h = vh; w = vh * geo.aspect; }
+  if (card) { // the picture and its card fit the view, with a little room round the card
+    const short = Math.min(geo.aspect, 1);
+    const k = Math.min((vw * 0.94) / (geo.aspect + short * (card[1] + card[3])), (vh * 0.94) / (1 + short * (card[0] + card[2])));
+    w = geo.aspect * k; h = k;
+  } else if (h > vh) { h = vh; w = vh * geo.aspect; }
+  canvas.classList.toggle('carded', !!card);
+  canvas.style.borderWidth = card ? card.map((f) => Math.round(f * Math.min(w, h)) + 'px').join(' ') : '';
+  canvas.style.borderRadius = card ? Math.round(instantFrame().corner * Math.min(w, h)) + 'px' : '';
   // Video records straight from this canvas, so it renders upright for how the phone
   // is held and the canvas is turned back on screen. The turn is fixed for a whole take.
   const videoMode = state.capture === 'video' && state.mode === 'live';
@@ -1170,16 +1340,16 @@ function uploadSource(el) {
   gl.bindTexture(gl.TEXTURE_2D, GL.frameTex);
   gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
   gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, el);
-  // The simulated iris and HDR sample smaller copies of the frame (blur, local brightness).
-  const mips = state.iris !== 'lens' || state.hdr !== 'off';
+  // The simulated iris, HDR and Instant's Soft Focus and Blur sample smaller copies of the frame.
+  const mips = state.iris !== 'lens' || state.hdr !== 'off' || !!instantFx().mips;
   if (mips) gl.generateMipmap(gl.TEXTURE_2D);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, mips ? gl.LINEAR_MIPMAP_LINEAR : gl.LINEAR);
 }
 
-// Bloom strength of the current look (Neon & Glow); imported LUTs don't glow.
-function lookGlow() {
-  return state.look === 'custom' ? 0 : (LOOKS.find((l) => l.id === state.look) || LOOKS[0]).glow || 0;
-}
+// The current built-in look, or null for an imported LUT.
+const builtInLook = () => (state.look === 'custom' ? null : LOOKS.find((l) => l.id === state.look) || LOOKS[0]);
+// Bloom strength of the current look (Neon & Glow, Instant's diffusion); imported LUTs don't glow.
+const lookGlow = () => (builtInLook() || {}).glow || 0;
 
 function makeGlowTarget(w, h, float) {
   const tex = gl.createTexture(), fbo = gl.createFramebuffer();
@@ -1211,7 +1381,7 @@ function renderGlow(geom) {
   gl.uniform1i(u.uImage, 0);
   gl.uniform1f(u.uExpandA, EXPAND_A);
   gl.uniform3fv(u.uGain, wbGains(state.kelvin).map((v) => v * state.iso / 800));
-  gl.uniform2f(u.uKnee, 1, 3.5);
+  gl.uniform2fv(u.uKnee, builtInLook().glowKnee || [1, 3.5]);
   gl.uniform1f(u.uStore, 1 / GL.glow.scale);
   gl.activeTexture(gl.TEXTURE5);
   gl.bindTexture(gl.TEXTURE_2D, null);
@@ -1232,11 +1402,13 @@ function irisBlurPx(geom) {
 
 function draw(w, h, { capture = false, mirror = false, turn = 0, geom = geo, focus = state.focusPt, snapMix = 0, snapCrop = null, seed = Math.random() * 500 } = {}) {
   const racking = !capture && focus === state.focusPt; // photos are saved fully focused on the target
-  const lut = activeLut(), u = GL.u, skinOn = skinReady(), skin = skinOn ? bakedLut(LOOKS[0]) : null;
+  const fx = instantFx(), variant = programFor(INSTANT_FX.indexOf(fx)), u = variant.u;
+  const lut = activeLut(), skinOn = skinReady(), skin = skinOn ? bakedLut(LOOKS[0]) : null;
   const glow = lookGlow();
   if (glow > 0) renderGlow(geom);
   gl.viewport(0, 0, w, h);
-  gl.useProgram(GL.prog);
+  gl.useProgram(variant.prog);
+  GL.current = variant;
   gl.bindVertexArray(GL.vao);
   gl.uniform4fv(u.uCrop, geom.crop);
   gl.uniform2f(u.uFlip, mirror ? 1 : 0, capture ? 1 : 0);
@@ -1253,7 +1425,7 @@ function draw(w, h, { capture = false, mirror = false, turn = 0, geom = geo, foc
   gl.uniform1f(u.uGrain, state.grain);
   gl.uniform1f(u.uSeed, seed);
   gl.uniform1f(u.uAspect, turn % 180 ? 1 / geom.aspect : geom.aspect);
-  gl.uniform1f(u.uVignette, state.vignette ? 1 : 0);
+  gl.uniform1f(u.uVignette, (state.vignette ? 1 : 0) + ((builtInLook() || {}).vignette || 0)); // a look can add its own falloff
   gl.uniform1f(u.uFalseColor, !capture && state.falseColor ? 1 : 0);
   gl.uniform2fv(u.uFocusPt, focus);
   gl.uniform2fv(u.uFocusPrev, racking ? state.focusPrev : focus);
@@ -1267,6 +1439,13 @@ function draw(w, h, { capture = false, mirror = false, turn = 0, geom = geo, foc
   gl.uniform1f(u.uGlow, glow);
   gl.uniform1i(u.uGlowTex, 5);
   gl.uniform1f(u.uGlowScale, GL.glow ? GL.glow.scale : 1);
+  // Effects follow the photo's up: a live photo view is turned at capture, a video as it records.
+  const fxTurn = capture || state.mode !== 'live' ? 0 : state.capture === 'video' ? turn : captureTurn();
+  gl.uniform1i(u.uFxTurn, fxTurn / 90);
+  gl.uniform1f(u.uFxMirror, mirror ? 1 : 0);
+  gl.uniform1i(u.uFirst, 6);
+  gl.uniform1f(u.uFirstOn, firstShot ? 1 : 0);
+  gl.uniform4fv(u.uFirstCrop, firstShot ? geometryFor(firstShot.width, firstShot.height).crop : [0, 0, 1, 1]);
   gl.uniform3f(u.uGlowLod, Math.log2(Math.max(1, visH / 120)), Math.log2(Math.max(1, visH / 40)), Math.log2(Math.max(1, visH / 14))); // about 1/120, 1/40 and 1/14 of the picture
   gl.uniform1i(u.uSnap, 4);
   gl.uniform4fv(u.uSnapCrop, snapCrop || geom.crop);
@@ -1286,6 +1465,8 @@ function draw(w, h, { capture = false, mirror = false, turn = 0, geom = geo, foc
   gl.bindTexture(gl.TEXTURE_2D, GL.snapTex);
   gl.activeTexture(gl.TEXTURE5);
   gl.bindTexture(gl.TEXTURE_2D, glow > 0 ? GL.glow.tex : GL.maskTex);
+  gl.activeTexture(gl.TEXTURE6);
+  gl.bindTexture(gl.TEXTURE_2D, GL.firstTex);
   gl.activeTexture(gl.TEXTURE0);
   gl.bindTexture(gl.TEXTURE_2D, GL.frameTex);
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
@@ -1362,6 +1543,60 @@ function liveToStill([u, v], { turn, zoom }) {
   return [u, v];
 }
 
+// Mounts a graded photo on an instant print card, drawn like the real thing: matte white, a shade darker
+// toward its edges, a fine diagonal grain in its surface, thin borders at the sides and top, and a wide
+// strip at the bottom whose upper band (over the developer pod) is a little darker and ends in a seam
+// with two small marks at the left edge. The picture sits in a crisp window.
+function onCard(pic, f) {
+  const s = Math.min(pic.width, pic.height), mm = s / f.mm; // pixels per mm of the real print
+  const side = Math.round(f.side * s), top = Math.round(f.top * s), bottom = Math.round(f.bottom * s);
+  const c = document.createElement('canvas');
+  const W = (c.width = pic.width + 2 * side), H = (c.height = pic.height + top + bottom);
+  const x = c.getContext('2d'), base = pic.height + top, seam = Math.round(base + f.seam * s), hair = Math.max(1, Math.round(mm * 0.12));
+  x.fillStyle = '#efefed';
+  x.fillRect(0, 0, W, H);
+  // Surface grain: short, uneven diagonal streaks, light and dark, like the embossing of the card,
+  // a little stronger on the strip. A 12 mm tile of them repeats over the card.
+  const t = Math.max(48, Math.round(mm * 12)), tile = document.createElement('canvas');
+  tile.width = tile.height = t;
+  const tx = tile.getContext('2d');
+  tx.lineCap = 'round';
+  for (let i = 0; i < 700; i++) {
+    const len = mm * (0.4 + Math.random() * 1.4), a = (-38 + (Math.random() - 0.5) * 12) * (Math.PI / 180);
+    const px = Math.random() * t, py = Math.random() * t, dx = Math.cos(a) * len, dy = Math.sin(a) * len;
+    tx.strokeStyle = Math.random() < 0.5 ? `rgba(0, 0, 0, ${0.3 + Math.random() * 0.7})` : `rgba(255, 255, 255, ${0.3 + Math.random() * 0.7})`;
+    tx.lineWidth = Math.max(1, mm * (0.05 + Math.random() * 0.08));
+    for (const ox of [-t, 0, t]) for (const oy of [-t, 0, t]) { tx.beginPath(); tx.moveTo(px + ox, py + oy); tx.lineTo(px + dx + ox, py + dy + oy); tx.stroke(); } // wraps, so the tile repeats seamlessly
+  }
+  x.fillStyle = x.createPattern(tile, 'repeat');
+  x.globalAlpha = 0.016; x.fillRect(0, 0, W, H);
+  x.globalAlpha = 0.024; x.fillRect(0, base, W, bottom);
+  x.globalAlpha = 1;
+  // The band over the pod, its seam, and the two marks at the left edge.
+  x.fillStyle = 'rgba(0, 0, 0, 0.03)'; x.fillRect(0, base, W, seam - base);
+  x.fillStyle = 'rgba(0, 0, 0, 0.09)'; x.fillRect(0, seam, W, hair);
+  x.fillStyle = 'rgba(255, 255, 255, 0.6)'; x.fillRect(0, seam + hair, W, hair);
+  x.fillStyle = 'rgba(0, 0, 0, 0.2)';
+  for (const dy of [-1.1, 0.9]) x.fillRect(0, Math.round(seam + dy * mm), Math.round(mm * 0.8), hair);
+  // A shade darker toward the card's edges, as a print looks under soft light.
+  const shade = (x0, y0, x1, y1) => { const g = x.createLinearGradient(x0, y0, x1, y1); g.addColorStop(0, 'rgba(0, 0, 0, 0.07)'); g.addColorStop(1, 'rgba(0, 0, 0, 0)'); return g; };
+  const e = 2.5 * mm;
+  x.fillStyle = shade(0, 0, e, 0); x.fillRect(0, 0, e, H);
+  x.fillStyle = shade(W, 0, W - e, 0); x.fillRect(W - e, 0, e, H);
+  x.fillStyle = shade(0, H, 0, H - e); x.fillRect(0, H - e, W, e);
+  x.fillStyle = shade(0, 0, 0, e * 0.6); x.fillRect(0, 0, W, e * 0.6);
+  // The picture in its window: a fine dark rim, and a catch of light along the window's lower edge.
+  x.drawImage(pic, side, top);
+  x.strokeStyle = 'rgba(0, 0, 0, 0.32)'; x.lineWidth = hair;
+  x.strokeRect(side - hair / 2, top - hair / 2, pic.width + hair, pic.height + hair);
+  x.fillStyle = 'rgba(255, 255, 255, 0.85)'; x.fillRect(side, base + hair, pic.width, hair);
+  // The card's own edge, so it reads against a white page.
+  x.strokeStyle = 'rgba(0, 0, 0, 0.1)'; x.lineWidth = hair;
+  x.strokeRect(hair / 2, hair / 2, W - hair, H - hair);
+  pic.width = pic.height = 0;
+  return c;
+}
+
 const toJpeg = (c, quality) => new Promise((res, rej) => c.toBlob((b) => (b ? res(b) : rej(new Error('Could not encode the photo.'))), 'image/jpeg', quality));
 
 // Grade stillCanvas at full resolution off screen and encode it as a JPEG.
@@ -1371,6 +1606,11 @@ async function renderPhoto(focus) {
   const cap = Math.min(GL.maxTex, 4096), floor = 1920; // zoomed shots are scaled up to at least HD
   if (Math.max(w, h) > cap) { const s = cap / Math.max(w, h); w = Math.round(w * s); h = Math.round(h * s); }
   if (Math.max(w, h) < floor) { const s = floor / Math.max(w, h); w = Math.round(w * s); h = Math.round(h * s); }
+  const card = instantFrame();
+  if (card) { // the print with its card stays within 4096 px, which iPhone canvases allow
+    const s = Math.min(w, h), k = Math.min(1, 4096 / Math.max(w + 2 * card.side * s, h + (card.top + card.bottom) * s));
+    w = Math.round(w * k); h = Math.round(h * k);
+  }
   if (state.skin && segmenter) segmentSkin(stillCanvas, g, false); // a fresh mask for exactly this frame
   const tex = gl.createTexture();
   gl.bindTexture(gl.TEXTURE_2D, tex);
@@ -1386,9 +1626,10 @@ async function renderPhoto(focus) {
   gl.deleteFramebuffer(fbo);
   gl.deleteTexture(tex);
 
-  const c = document.createElement('canvas');
+  let c = document.createElement('canvas');
   c.width = w; c.height = h;
   c.getContext('2d').putImageData(new ImageData(px, w, h), 0, 0);
+  if (card) { c = onCard(c, card); w = c.width; h = c.height; }
   const blob = await toJpeg(c, 0.92);
   const t = document.createElement('canvas'), ts = 320 / Math.max(w, h);
   t.width = Math.round(w * ts); t.height = Math.round(h * ts);
@@ -1526,9 +1767,10 @@ function syncCapture() {
 
 function setCapture(mode) {
   cancelCountdown();
+  setFirstShot(null);
   state.capture = mode;
   prefs.set('capture', mode);
-  syncCapture();
+  syncCapture(); syncHud();
   if (mode === 'video') ensureMic(); else releaseMic();
   layout();
 }
@@ -1593,7 +1835,7 @@ function orientationChanged() {
   const ui = devAngle === null ? 0 : mod360(devAngle - screenAngle());
   $('app').style.setProperty('--ui-rot', (ui > 180 ? ui - 360 : ui) + 'deg');
   if (state.mode !== 'live' || recording || !video.videoWidth) return;
-  if (state.capture === 'video') layout();
+  if (state.capture === 'video' || instantFrame()) layout(); // a video's turn, or which side Instant's strip goes
   const out = (video.videoWidth > video.videoHeight) !== (captureTurn() % 180 !== 0) ? 'Landscape' : 'Portrait';
   if (lastOutput && out !== lastOutput) toast(out);
   lastOutput = out;
@@ -2037,8 +2279,9 @@ $('lockBadge').addEventListener('click', () => {
 function screenToSource(x, y) {
   if (!geo) return null;
   const turn = state.capture === 'video' && state.mode === 'live' ? state.videoTurn : 0;
-  const r = canvas.getBoundingClientRect(), a = (turn * Math.PI) / 180;
-  const dx = x - (r.left + r.width / 2), dy = y - (r.top + r.height / 2);
+  const r = canvas.getBoundingClientRect(), a = (turn * Math.PI) / 180, cs = getComputedStyle(canvas);
+  const [bt, br, bb, bl] = ['Top', 'Right', 'Bottom', 'Left'].map((k) => parseFloat(cs['border' + k + 'Width']) || 0); // Instant's card
+  const dx = x - (r.left + bl + (r.width - bl - br) / 2), dy = y - (r.top + bt + (r.height - bt - bb) / 2);
   const ox = 0.5 + (dx * Math.cos(a) - dy * Math.sin(a)) / parseFloat(canvas.style.width);
   const oy = 0.5 + (dx * Math.sin(a) + dy * Math.cos(a)) / parseFloat(canvas.style.height);
   if (ox < 0 || ox > 1 || oy < 0 || oy > 1) return null;
@@ -2099,7 +2342,7 @@ async function startCamera({ quiet = false, retried = false, keepRecording = fal
 // A lens change while recording keeps the take (and the microphone) going; a quiet restart keeps a self-timer counting.
 function stopCamera({ keepRecording = false, keepTimer = false } = {}) {
   if (!keepRecording) stopRecording();
-  if (!keepTimer) cancelCountdown();
+  if (!keepTimer) { cancelCountdown(); if (!state.editing) setFirstShot(null); } // a quiet restart keeps the first shot too
   loopToken++;
   if (stream) { stream.getTracks().forEach((t) => t.stop()); stream = null; }
   if (!keepRecording) releaseMic();
@@ -2203,6 +2446,13 @@ async function startRegrade(rec) {
   state.editing = rec;
   applySettings(rec.settings || {}, false);
   enterStill();
+  const first = await shotSource(rec.id + ':first'); // a Double Exposure or Half-Frame photo's first shot
+  if (first) {
+    const img = new Image(), url = URL.createObjectURL(first);
+    img.src = url;
+    try { await img.decode(); const c = document.createElement('canvas'); c.width = img.naturalWidth; c.height = img.naturalHeight; c.getContext('2d').drawImage(img, 0, 0); setFirstShot(c); } catch {}
+    URL.revokeObjectURL(url);
+  }
   $('tallyText').textContent = 'EDIT';
   toast('Re-grading ' + rec.name);
 }
@@ -2210,6 +2460,7 @@ async function startRegrade(rec) {
 function endRegrade() {
   if (!state.editing) return;
   state.editing = null;
+  setFirstShot(null);
   applySettings(liveSettings, true);
   liveSettings = null;
 }
@@ -2401,16 +2652,19 @@ function syncLooks() {
 }
 
 function setLook(id) {
+  const shape = instantFrame();
+  if (id !== state.look && !state.editing) setFirstShot(null);
   state.look = id;
   prefs.set('look', id);
-  syncLooks();
+  syncLooks(); syncHud();
+  if (instantFrame() !== shape) layout(); // Instant's print frame changes the picture's shape
   requestRender();
 }
 
 function syncHud() {
   $('isoVal').textContent = state.iso;
   $('wbVal').textContent = state.kelvin + 'K';
-  $('frameVal').textContent = state.frame;
+  $('frameVal').textContent = instantFrame() ? instantFrame().name.toUpperCase() : state.frame;
   $('hudFc').setAttribute('aria-pressed', String(state.falseColor));
   $('irisVal').textContent = ADJ.iris.format(state.iris);
   syncHdr(); syncTimer();
@@ -2445,7 +2699,7 @@ const ADJ = {
 function openAdjust(which) {
   if (adjusting === which) return closeAdjust();
   adjusting = which;
-  closeColourPanel();
+  closeLookPanels();
   const a = ADJ[which];
   for (const k in ADJ) $(ADJ[k].hud).setAttribute('aria-expanded', String(k === which));
   $('adjLabel').textContent = a.label;
@@ -2488,6 +2742,7 @@ $('hudIso').addEventListener('click', () => openAdjust('iso'));
 $('hudWb').addEventListener('click', () => openAdjust('wb'));
 $('hudIris').addEventListener('click', () => openAdjust('iris'));
 $('hudFrame').addEventListener('click', () => {
+  if (instantFrame()) return openLookPanel('instant'); // the print format sets the shape
   const i = FRAMES.findIndex((f) => f.id === state.frame);
   state.frame = FRAMES[(i + 1) % FRAMES.length].id;
   prefs.set('frame', state.frame);
@@ -2503,7 +2758,7 @@ $('hudFc').addEventListener('click', () => {
 $('view').addEventListener('click', (e) => {
   if (e.target.closest('.adjust, .lenses, .lock-badge, .notice, .view-tools')) return;
   if (adjusting) { closeAdjust(); return; }
-  if (!$('colourPanel').hidden) { closeColourPanel(); return; }
+  if (lookPanelOpen()) { closeLookPanels(); return; }
   if (state.mode !== 'live' && state.mode !== 'still') return;
   const uv = screenToSource(e.clientX, e.clientY);
   if (uv) focusAt(uv, e.clientX, e.clientY);
@@ -2513,12 +2768,13 @@ $('looks').addEventListener('click', (e) => {
   const b = e.target.closest('.chip');
   if (!b) return;
   if (b.dataset.look === 'import') return $('pickLut').click();
-  if (b.dataset.look === 'one' && state.look === 'one') { // tapping One Colour again shows or hides its colors
-    if ($('colourPanel').hidden) openColourPanel(); else closeColourPanel();
+  const panel = LOOK_PANELS[b.dataset.look];
+  if (panel && state.look === b.dataset.look) { // tapping One Colour or Instant again shows or hides its options
+    if ($(panel).hidden) openLookPanel(b.dataset.look); else closeLookPanels();
     return;
   }
   setLook(b.dataset.look);
-  if (b.dataset.look === 'one') openColourPanel(); else closeColourPanel();
+  if (panel) openLookPanel(b.dataset.look); else closeLookPanels();
 });
 
 /* One Colour picker */
@@ -2535,8 +2791,48 @@ function syncColourPanel() {
   for (const b of $('cpRange').children) b.setAttribute('aria-checked', String(b.dataset.v === state.oneRange));
   $('cpName').textContent = oneColour().name;
 }
-function openColourPanel() { closeAdjust(); syncColourPanel(); $('colourPanel').hidden = false; }
-function closeColourPanel() { $('colourPanel').hidden = true; }
+// Looks with options show them in a panel when their chip is tapped.
+const LOOK_PANELS = { one: 'colourPanel', instant: 'instantPanel' };
+function openLookPanel(look) {
+  closeAdjust(); closeLookPanels();
+  if (look === 'one') syncColourPanel(); else syncInstantPanel();
+  $(LOOK_PANELS[look]).hidden = false;
+}
+function closeLookPanels() { for (const id of Object.values(LOOK_PANELS)) $(id).hidden = true; }
+const lookPanelOpen = () => Object.values(LOOK_PANELS).some((id) => !$(id).hidden);
+/* Instant's print frame */
+for (const f of INSTANT_FX) {
+  const b = document.createElement('button');
+  b.setAttribute('role', 'radio');
+  b.dataset.v = f.id;
+  b.textContent = f.name;
+  $('ipFx').appendChild(b);
+}
+function syncInstantPanel() {
+  for (const b of $('ipFrame').children) b.setAttribute('aria-checked', String(b.dataset.v === state.instantFrame));
+  for (const b of $('ipFx').children) b.setAttribute('aria-checked', String(b.dataset.v === state.instantFx));
+  $('ipName').textContent = (INSTANT_FRAMES[state.instantFrame] || { name: 'Off' }).name;
+  const fx = INSTANT_FX.find((f) => f.id === state.instantFx) || INSTANT_FX[0];
+  $('ipFxNote').textContent = fx.twoShot ? 'Two shots: press the shutter twice. Photos only.' : '';
+}
+$('ipFx').addEventListener('click', (e) => {
+  const b = e.target.closest('button');
+  if (!b || b.dataset.v === state.instantFx) return;
+  state.instantFx = b.dataset.v;
+  prefs.set('instantFx', state.instantFx);
+  if (!state.editing) setFirstShot(null); // a re-grade keeps the photo's first shot
+  syncInstantPanel();
+  if (state.mode === 'still') uploadSource(stillCanvas); // Soft Focus and Blur need the image's mipmaps
+  requestRender();
+});
+$('ipFrame').addEventListener('click', (e) => {
+  const b = e.target.closest('button');
+  if (!b || b.dataset.v === state.instantFrame) return;
+  state.instantFrame = b.dataset.v;
+  prefs.set('instantFrame', state.instantFrame);
+  syncInstantPanel(); syncHud(); layout();
+});
+
 for (const [id, key] of [['cpSwatches', 'oneHue'], ['cpRange', 'oneRange']]) {
   $(id).addEventListener('click', (e) => {
     const b = e.target.closest('button');
@@ -2564,6 +2860,17 @@ async function shoot() {
     if (recording) stopRecording(); else startRecording();
     return;
   }
+  if (state.mode === 'live' && instantFx().twoShot && !firstShot) { // Double Exposure, Half-Frame: keep the first frame
+    flash();
+    grabLiveFrame();
+    const c = document.createElement('canvas');
+    c.width = stillCanvas.width; c.height = stillCanvas.height;
+    c.getContext('2d').drawImage(stillCanvas, 0, 0);
+    stillCanvas.width = stillCanvas.height = 0;
+    setFirstShot(c);
+    toast('First shot taken. Now take the second.');
+    return;
+  }
   busy = true;
   $('shutter').disabled = true;
   try {
@@ -2577,6 +2884,8 @@ async function shoot() {
     } else {
       // The focus point is stored in the saved frame's coordinates, for re-grading.
       const rec = await storeShot(shot, await toJpeg(stillCanvas, 0.95), { settings: { ...gradeSettings(), focusPt: focus } });
+      if (firstShot) await storeFirstShot(rec.id, firstShot); // a two-shot photo keeps its first frame too
+      setFirstShot(null);
       toast('Saved ' + rec.name);
     }
     if (state.mode === 'still') leaveStill();
@@ -2587,6 +2896,25 @@ async function shoot() {
     busy = false;
     $('shutter').disabled = false;
   }
+}
+
+/* Double Exposure and Half-Frame keep the first shot's frame (upright, ungraded) until the second.
+   A badge shows it's waiting; tapping the badge, or changing look, effect or mode, discards it. */
+let firstShot = null;
+function setFirstShot(c) {
+  firstShot = c;
+  if (c) {
+    gl.bindTexture(gl.TEXTURE_2D, GL.firstTex);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, c);
+  }
+  $('fxBadge').hidden = !c || !!state.editing;
+  requestRender();
+}
+$('fxBadge').addEventListener('click', () => { setFirstShot(null); toast('First shot discarded'); });
+async function storeFirstShot(id, c) {
+  const blob = await toJpeg(c, 0.95);
+  try { await idb.put('sources', await blob.arrayBuffer(), id + ':first'); } catch { memSources.set(id + ':first', blob); }
 }
 
 /* Self-timer: Off, 3 s, 10 s. A countdown runs on the viewfinder; tapping the shutter cancels it. */
@@ -2605,7 +2933,7 @@ $('timerBtn').addEventListener('click', () => {
   toast(state.timer ? 'Timer ' + state.timer + ' seconds' : 'Timer off');
 });
 function startCountdown() {
-  closeAdjust(); closeColourPanel();
+  closeAdjust(); closeLookPanels();
   let left = state.timer;
   const tick = () => {
     if (!left) { cancelCountdown(); shoot(); return; }
@@ -2902,9 +3230,10 @@ $('selDeleteYes').addEventListener('click', async () => {
 });
 
 async function deleteShot(rec) {
-  try { await idb.del('images', rec.id); await idb.del('sources', rec.id); await idb.del('shots', rec.id); } catch {}
+  try { await idb.del('images', rec.id); await idb.del('sources', rec.id); await idb.del('sources', rec.id + ':first'); await idb.del('shots', rec.id); } catch {}
   memImages.delete(rec.id);
   memSources.delete(rec.id);
+  memSources.delete(rec.id + ':first');
   URL.revokeObjectURL(rec.thumbUrl);
   shots = shots.filter((s) => s.id !== rec.id);
   if (state.editing === rec) leaveStill();
@@ -2940,7 +3269,7 @@ async function openViewer(rec, dir = 0) {
   $('viewerMeta').innerHTML = '';
   const s = rec.settings || {};
   const label = (list, id) => (list.find((x) => x.id === id) || {}).label || '';
-  for (const [k, v] of [['LOOK', rec.look], ['ISO', s.iso], ['WB', s.kelvin && s.kelvin + 'K'], ['CONTRAST', label(CONTRASTS, s.contrast)], ['ROLL-OFF', label(ROLLOFFS, s.rolloff)], ['IRIS', s.iris && s.iris !== 'lens' ? 'f/' + s.iris + ' (simulated)' : ''], ['HDR', s.hdr && s.hdr !== 'off' ? { natural: 'Natural', strong: 'Strong' }[s.hdr] : ''], ['', new Date(rec.edited || rec.created).toLocaleString()]]) {
+  for (const [k, v] of [['LOOK', rec.look], ['ISO', s.iso], ['WB', s.kelvin && s.kelvin + 'K'], ['CONTRAST', label(CONTRASTS, s.contrast)], ['ROLL-OFF', label(ROLLOFFS, s.rolloff)], ['IRIS', s.iris && s.iris !== 'lens' ? 'f/' + s.iris + ' (simulated)' : ''], ['HDR', s.hdr && s.hdr !== 'off' ? { natural: 'Natural', strong: 'Strong' }[s.hdr] : ''], ['FRAME', rec.kind !== 'video' && s.look === 'instant' && INSTANT_FRAMES[s.instantFrame] ? INSTANT_FRAMES[s.instantFrame].name + ' print' : ''], ['EFFECT', s.look === 'instant' && s.instantFx && s.instantFx !== 'normal' ? (INSTANT_FX.find((f) => f.id === s.instantFx) || {}).name : ''], ['', new Date(rec.edited || rec.created).toLocaleString()]]) {
     if (!v) continue;
     const span = document.createElement('span');
     if (k) { const b = document.createElement('b'); b.textContent = k + ' '; span.appendChild(b); }
@@ -2984,9 +3313,10 @@ function slideMedia(el, x, opacity, ms) {
   if (!ms) void el.offsetWidth; // apply now, so a following slide animates from here
   return new Promise((res) => setTimeout(res, ms));
 }
-let viewerMoving = false;
+let viewerMoving = false, viewerQueued = 0; // a swipe made while one is still sliding runs next
 async function stepViewer(dir) {
-  if (!viewing || viewerMoving) return;
+  if (viewerMoving) { viewerQueued = dir; return; }
+  if (!viewing) return;
   const next = shots[viewerIndex() + dir], el = viewerMedia();
   if (!next) { slideMedia(el, 0, 1, 180); return; } // at either end it springs back
   viewerMoving = true;
@@ -2996,6 +3326,9 @@ async function stepViewer(dir) {
   } finally {
     viewerMoving = false;
   }
+  const queued = viewerQueued;
+  viewerQueued = 0;
+  if (queued) stepViewer(queued);
 }
 $('viewerPrev').addEventListener('click', () => stepViewer(-1));
 $('viewerNext').addEventListener('click', () => stepViewer(1));
@@ -3011,7 +3344,7 @@ document.addEventListener('keydown', (e) => {
 let swipe = null;
 $('viewerStage').addEventListener('touchstart', (e) => {
   swipe = null;
-  if (e.touches.length !== 1 || !viewing || viewerMoving || e.target.closest('.v-nav')) return;
+  if (e.touches.length !== 1 || !viewing || e.target.closest('.v-nav')) return;
   const t = e.touches[0];
   if (viewing.rec.kind === 'video' && t.clientY > $('viewerVideo').getBoundingClientRect().bottom - 64) return; // the video's own controls
   swipe = { x: t.clientX, y: t.clientY, start: performance.now(), dx: 0, axis: '' };
@@ -3027,6 +3360,7 @@ $('viewerStage').addEventListener('touchmove', (e) => {
   if (swipe.axis !== 'x') return;
   e.preventDefault();
   swipe.dx = dx;
+  if (viewerMoving) return; // the last swipe is still sliding; this one is queued when it ends
   const i = viewerIndex(), end = dx > 0 ? i <= 0 : i >= shots.length - 1;
   slideMedia(viewerMedia(), end ? dx * 0.3 : dx, 1, 0); // resists past either end
 }, { passive: false });
@@ -3037,7 +3371,7 @@ function endSwipe(cancelled) {
   if (axis !== 'x') return;
   const fast = Math.abs(dx) > 30 && Math.abs(dx) / Math.max(1, performance.now() - start) > 0.45;
   if (!cancelled && (Math.abs(dx) > $('viewerStage').clientWidth * 0.22 || fast)) stepViewer(dx < 0 ? 1 : -1);
-  else slideMedia(viewerMedia(), 0, 1, 180);
+  else if (!viewerMoving) slideMedia(viewerMedia(), 0, 1, 180);
 }
 $('viewerStage').addEventListener('touchend', () => endSwipe(false));
 $('viewerStage').addEventListener('touchcancel', () => endSwipe(true));
