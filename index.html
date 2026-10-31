@@ -380,7 +380,7 @@ legend { padding: 0; margin-bottom: 8px; font-weight: 600; }
     <div class="reticle" id="reticle" hidden><span id="reticleTag">AF</span></div>
     <div class="lenses" id="lenses" role="radiogroup" aria-label="Zoom" hidden></div>
     <div class="zoom-readout" id="zoomReadout" hidden>1×</div>
-    <div class="ai-tag" id="aiTag" hidden><i></i>AI · SKIN</div>
+    <div class="ai-tag" id="aiTag" hidden><i></i>AI · RETOUCH</div>
     <button class="lock-badge" id="lockBadge" hidden aria-label="Unlock focus"><span id="lockText">AF LOCK</span><b aria-hidden="true">×</b></button>
     <div class="view-tools">
       <button class="tool-btn hdr-btn" id="hdrBtn" data-level="off" aria-label="HDR off">HDR OFF</button>
@@ -446,7 +446,7 @@ legend { padding: 0; margin-bottom: 8px; font-weight: 600; }
       <button role="radio" data-v="off">Off</button><button role="radio" data-v="natural">Natural</button><button role="radio" data-v="strong">Strong</button>
     </div>
   </div>
-  <div class="row"><span id="skinLabel">AI skin tone<small class="fine" id="skinNote">Finds people and keeps their skin natural and clear in every look.</small></span><button class="switch" id="skinSwitch" role="switch" aria-labelledby="skinLabel" aria-checked="true"></button></div>
+  <div class="row"><span id="skinLabel">AI skin retouch<small class="fine" id="skinNote">Finds people and retouches their skin: blemishes and blotches evened out, pores and texture kept, colour unchanged.</small></span><button class="switch" id="skinSwitch" role="switch" aria-labelledby="skinLabel" aria-checked="true"></button></div>
   <div class="row"><span id="afSpeedLabel">Focus transition<small class="fine">How fast focus moves to a spot you tap.</small></span>
     <div class="seg" id="afSpeedSeg" role="radiogroup" aria-labelledby="afSpeedLabel">
       <button role="radio" data-v="slow">Slow</button><button role="radio" data-v="medium">Medium</button><button role="radio" data-v="fast">Fast</button>
@@ -908,8 +908,7 @@ uniform float uSnapMix;
 uniform sampler2D uMask;     // AI skin mask for the region uMaskCrop of the frame
 uniform vec4 uMaskCrop;
 uniform float uSkin;
-uniform sampler3D uSkinLut;  // natural rendering used for skin
-uniform float uSkinLutSize;
+uniform vec2 uRetouchLod;    // AI skin retouch: mip levels of the texture scale and of the blemish scale, set by face size
 uniform sampler3D uLut;
 uniform float uLutSize;
 uniform vec3 uLutMin;
@@ -1080,6 +1079,25 @@ void main() {
   }
   if (FX == 8 && uFirstOn > 0.5) lin = (lin + firstLin(up)) * 0.62; // Double Exposure: both shots add their light
 
+  // AI skin retouch, done the way a retoucher's frequency separation works. Where the AI found skin, the
+  // picture is split into fine texture (pores, fine hair), a middle band (blemishes, blotches, uneven
+  // redness) and the broad shape and light of the face. Texture and shape stay exactly as they are; only
+  // the middle band is evened out, its colour (redness) more than its light and dark. Working in ratios
+  // keeps the skin's colour and brightness as they were. The face mask covers eyes and mouth too, so big
+  // swings in the band are taken as features (eyes, brows, lashes, the lip line, lip colour) and kept.
+  float skin = 0.0;
+  if (uSkin > 0.5 && !fromFirst) {
+    skin = texture(uMask, (src - uMaskCrop.xy) / uMaskCrop.zw).r;
+    if (skin > 0.003) {
+      vec3 band = log2(max(softAt(src, uRetouchLod.x), 1e-4)) - log2(max(softAt(src, uRetouchLod.y), 1e-4));
+      float l = dot(band, LUMA);
+      vec3 c = band - l;                                      // the band's colour, apart from its light
+      float evenL = 0.78 * exp(-pow(abs(l) / 0.6, 2.0));      // most of a blemish, none of an eye or brow
+      float evenC = 0.9 * exp(-pow(abs(l) / 0.85, 2.0)) * exp(-pow(length(c) / 0.5, 2.0)); // lips keep their colour
+      lin *= exp2(-(l * evenL + c * evenC) * skin);
+    }
+  }
+
   // HDR tone mapping: pull large-scale brightness toward mid grey, so bright skies come down and
   // shadows open up, while local detail stays. The base brightness blends two blur sizes; near a
   // strong edge the smaller one takes over, which keeps bright and dark areas from haloing.
@@ -1108,19 +1126,6 @@ void main() {
   enc = clamp((enc - uLutMin) / (uLutMax - uLutMin), 0.0, 1.0);
   vec3 o = texture(uLut, enc * ((uLutSize - 1.0) / uLutSize) + 0.5 / uLutSize).rgb;
 
-  // People: where the AI found skin, use the natural rendering, a touch brighter and with less grain.
-  float skin = 0.0;
-  if (uSkin > 0.5) {
-    skin = fromFirst ? 0.0 : texture(uMask, (src - uMaskCrop.xy) / uMaskCrop.zw).r;
-    if (skin > 0.003) {
-      vec3 w = M709toRWG * lin;
-      vec3 e = clamp(vec3(log3g10(w.r), log3g10(w.g), log3g10(w.b)), 0.0, 1.0);
-      vec3 natural = texture(uSkinLut, e * ((uSkinLutSize - 1.0) / uSkinLutSize) + 0.5 / uSkinLutSize).rgb;
-      natural += (1.0 - natural) * 0.06;
-      o = mix(o, natural, skin);
-    }
-  }
-
   vec2 q = (vFrame - 0.5) * vec2(uAspect, 1.0);
   float r = length(q) / length(vec2(uAspect, 1.0) * 0.5);
   o *= 1.0 - uVignette * 0.32 * pow(r, 2.4);
@@ -1138,7 +1143,7 @@ void main() {
     vec2 cell = floor(vFrame * vec2(1500.0 * uAspect, 1500.0));
     float n = hash(cell + uSeed) + hash(cell * 1.37 + uSeed * 1.71) - 1.0;
     float y = dot(o, vec3(0.2126, 0.7152, 0.0722));
-    o += n * uGrain * 0.055 * (0.35 + 2.6 * y * (1.0 - y)) * (1.0 - 0.6 * skin);
+    o += n * uGrain * 0.055 * (0.35 + 2.6 * y * (1.0 - y)) * (1.0 - 0.25 * skin); // a little finer on retouched skin
   }
   o *= fxMask;
 
@@ -1210,7 +1215,7 @@ function initGL() {
 
 // The main program for an Instant effect (0 = none). Each effect is compiled into its own program with FX
 // set, so a shader carries only the code it runs; they are built the first time they're needed.
-const MAIN_UNIFORMS = ['uCrop', 'uFlip', 'uTurn', 'uImage', 'uLut', 'uLutSize', 'uLutMin', 'uLutMax', 'uInput', 'uExpandA', 'uExposure', 'uWB', 'uGrain', 'uSeed', 'uAspect', 'uVignette', 'uFalseColor', 'uFocusPt', 'uFocusPrev', 'uFocusMix', 'uTexSize', 'uCropShortPx', 'uBlurPx', 'uSnap', 'uSnapCrop', 'uSnapMix', 'uMask', 'uMaskCrop', 'uSkin', 'uSkinLut', 'uSkinLutSize', 'uHdr', 'uHdrLod', 'uGlow', 'uGlowLod', 'uGlowTex', 'uGlowScale', 'uFxTurn', 'uFxMirror', 'uFirst', 'uFirstCrop', 'uFirstOn'];
+const MAIN_UNIFORMS = ['uCrop', 'uFlip', 'uTurn', 'uImage', 'uLut', 'uLutSize', 'uLutMin', 'uLutMax', 'uInput', 'uExpandA', 'uExposure', 'uWB', 'uGrain', 'uSeed', 'uAspect', 'uVignette', 'uFalseColor', 'uFocusPt', 'uFocusPrev', 'uFocusMix', 'uTexSize', 'uCropShortPx', 'uBlurPx', 'uSnap', 'uSnapCrop', 'uSnapMix', 'uMask', 'uMaskCrop', 'uSkin', 'uRetouchLod', 'uHdr', 'uHdrLod', 'uGlow', 'uGlowLod', 'uGlowTex', 'uGlowScale', 'uFxTurn', 'uFxMirror', 'uFirst', 'uFirstCrop', 'uFirstOn'];
 function programFor(fx) {
   if (GL.variants.has(fx)) return GL.variants.get(fx);
   const prog = gl.createProgram();
@@ -1340,8 +1345,8 @@ function uploadSource(el) {
   gl.bindTexture(gl.TEXTURE_2D, GL.frameTex);
   gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
   gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, el);
-  // The simulated iris, HDR and Instant's Soft Focus and Blur sample smaller copies of the frame.
-  const mips = state.iris !== 'lens' || state.hdr !== 'off' || !!instantFx().mips;
+  // The simulated iris, HDR, skin retouch and Instant's Soft Focus and Blur sample smaller copies of the frame.
+  const mips = state.iris !== 'lens' || state.hdr !== 'off' || !!instantFx().mips || skinReady();
   if (mips) gl.generateMipmap(gl.TEXTURE_2D);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, mips ? gl.LINEAR_MIPMAP_LINEAR : gl.LINEAR);
 }
@@ -1403,7 +1408,7 @@ function irisBlurPx(geom) {
 function draw(w, h, { capture = false, mirror = false, turn = 0, geom = geo, focus = state.focusPt, snapMix = 0, snapCrop = null, seed = Math.random() * 500 } = {}) {
   const racking = !capture && focus === state.focusPt; // photos are saved fully focused on the target
   const fx = instantFx(), variant = programFor(INSTANT_FX.indexOf(fx)), u = variant.u;
-  const lut = activeLut(), skinOn = skinReady(), skin = skinOn ? bakedLut(LOOKS[0]) : null;
+  const lut = activeLut(), skinOn = skinReady();
   const glow = lookGlow();
   if (glow > 0) renderGlow(geom);
   gl.viewport(0, 0, w, h);
@@ -1451,16 +1456,16 @@ function draw(w, h, { capture = false, mirror = false, turn = 0, geom = geo, foc
   gl.uniform4fv(u.uSnapCrop, snapCrop || geom.crop);
   gl.uniform1f(u.uSnapMix, snapMix);
   gl.uniform1i(u.uMask, 2);
-  gl.uniform1i(u.uSkinLut, 3);
   gl.uniform1f(u.uSkin, skinOn ? 1 : 0);
   gl.uniform4fv(u.uMaskCrop, maskCrop);
-  gl.uniform1f(u.uSkinLutSize, skin ? skin.size : 2);
+  // The retouch scales with the size of the faces: about the square root of how much of the picture is skin.
+  // Texture is finer than about 1/250 of a face, blemishes and blotches up to about 1/40.
+  const faceH = Math.min(0.8, Math.max(0.08, Math.sqrt(skinCover))) * visH;
+  gl.uniform2f(u.uRetouchLod, Math.log2(Math.max(1, faceH / 250)), Math.log2(Math.max(1, faceH / 40)));
   gl.activeTexture(gl.TEXTURE1);
   gl.bindTexture(gl.TEXTURE_3D, lut.tex);
   gl.activeTexture(gl.TEXTURE2);
   gl.bindTexture(gl.TEXTURE_2D, GL.maskTex);
-  gl.activeTexture(gl.TEXTURE3);
-  gl.bindTexture(gl.TEXTURE_3D, skin ? skin.tex : null);
   gl.activeTexture(gl.TEXTURE4);
   gl.bindTexture(gl.TEXTURE_2D, GL.snapTex);
   gl.activeTexture(gl.TEXTURE5);
@@ -3018,10 +3023,10 @@ function syncSettings() {
   for (const b of $('hdrSeg').children) b.setAttribute('aria-checked', String(b.dataset.v === state.hdr));
   $('hdrNote').textContent = 'Brings bright skies down and opens up shadows, keeping detail. iPhone doesn’t let web apps shoot several exposures, so this tone-maps each frame.';
   $('skinSwitch').setAttribute('aria-checked', String(state.skin));
-  $('skinNote').textContent = !state.skin ? 'Off: skin follows the look.'
+  $('skinNote').textContent = !state.skin ? 'Off: skin isn’t retouched.'
     : aiStatus === 'loading' ? 'Loading the AI model (about 27 MB, first time only)…'
     : aiStatus === 'failed' ? 'The AI model couldn’t load here. Open the app from its web address and try again.'
-    : 'Finds people and keeps their skin natural and clear in every look.';
+    : 'Finds people and retouches their skin: blemishes and blotches evened out, pores and texture kept, colour unchanged.';
   $('rotSwitch').setAttribute('aria-checked', String(state.autoRotate));
   $('rotNote').textContent = !state.autoRotate ? 'Off: shots follow the screen.'
     : motion === 'denied' ? 'Motion access is off. Allow it in Settings → Safari → Motion & Orientation Access, then reopen the app.'
