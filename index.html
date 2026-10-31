@@ -447,6 +447,11 @@ legend { padding: 0; margin-bottom: 8px; font-weight: 600; }
     </div>
   </div>
   <div class="row"><span id="skinLabel">AI skin retouch<small class="fine" id="skinNote">Finds people and retouches their skin: blemishes and blotches evened out, pores and texture kept, colour unchanged.</small></span><button class="switch" id="skinSwitch" role="switch" aria-labelledby="skinLabel" aria-checked="true"></button></div>
+  <div class="field" id="retouchField"><span id="retouchLabel">Retouch strength<small class="fine" id="retouchNote"></small></span>
+    <div class="seg full" id="retouchSeg" role="radiogroup" aria-labelledby="retouchLabel">
+      <button role="radio" data-v="low">Low</button><button role="radio" data-v="natural">Natural</button><button role="radio" data-v="strong">Strong</button>
+    </div>
+  </div>
   <div class="row"><span id="afSpeedLabel">Focus transition<small class="fine">How fast focus moves to a spot you tap.</small></span>
     <div class="seg" id="afSpeedSeg" role="radiogroup" aria-labelledby="afSpeedLabel">
       <button role="radio" data-v="slow">Slow</button><button role="radio" data-v="medium">Medium</button><button role="radio" data-v="fast">Fast</button>
@@ -567,7 +572,7 @@ const HDR_LABELS = { off: 'HDR OFF', natural: 'HDR', strong: 'HDR+' };
 // Simulated iris. 'lens' leaves the lens as it is; an f-stop adds depth-of-field blur.
 const IRIS = [1.4, 2, 2.8, 4, 5.6, 8, 'lens'];
 // Settings a shot remembers so it can be re-graded later, like a RAW clip.
-const GRADE_KEYS = ['look', 'iso', 'kelvin', 'frame', 'grain', 'vignette', 'contrast', 'rolloff', 'iris', 'focusPt', 'oneHue', 'oneRange', 'skin', 'hdr', 'instantFrame', 'instantFx'];
+const GRADE_KEYS = ['look', 'iso', 'kelvin', 'frame', 'grain', 'vignette', 'contrast', 'rolloff', 'iris', 'focusPt', 'oneHue', 'oneRange', 'skin', 'retouch', 'hdr', 'instantFrame', 'instantFx'];
 
 const state = {
   mode: 'boot',            // boot | live | still | nocam
@@ -587,7 +592,8 @@ const state = {
   zoom: 1,                 // current zoom, relative to the main lens; eases toward zoomTarget
   zoomTarget: 1,
   physLens: 'wide',        // the back camera to open: ultra | wide | tele
-  skin: prefs.get('skin', true), // AI: keep people's skin natural
+  skin: prefs.get('skin', true), // AI: retouch people's skin
+  retouch: prefs.get('retouch', 'natural'), // how much: low | natural | strong
   hdr: prefs.get('hdr', 'off'),  // off | natural | strong
   timer: prefs.get('timer', 0),  // self-timer seconds: 0, 3 or 10
   iris: prefs.get('iris', 'lens'),
@@ -712,6 +718,15 @@ const INSTANT_FRAMES = Object.fromEntries(Object.entries({
   square: { name: 'Square', long: 62, short: 62, side: 5, top: 7, bottom: 17 },
   wide: { name: 'Wide', long: 99, short: 62, side: 4.5, top: 7, bottom: 17 },
 }).map(([id, f]) => [id, { name: f.name, ratio: f.long / f.short, mm: f.short, side: f.side / f.short, top: f.top / f.short, bottom: f.bottom / f.short, corner: 1.2 / f.short, seam: (f.bottom * 0.25) / f.short }]));
+// AI skin retouch strengths: how much of the blemish band's light and colour is evened out, and how big a
+// swing in light still counts as a blemish rather than a feature. Natural takes about two thirds out;
+// texture finer than the band is never touched.
+const RETOUCH = {
+  low: { name: 'Low', light: 0.3, colour: 0.45, feature: 0.4, note: 'Only redness and the most obvious spots are evened out.' },
+  natural: { name: 'Natural', light: 0.5, colour: 0.65, feature: 0.5, note: 'Blemishes and blotches are softened; skin still looks like skin.' },
+  strong: { name: 'Strong', light: 0.78, colour: 0.9, feature: 0.6, note: 'Most blemishes and uneven tone are evened out, for a polished portrait.' },
+};
+
 // Instant's lens effects, as on instant cameras with digital effects. Their order is the shader's FX.
 // Double Exposure and Half-Frame take two shots: the first press keeps a frame, the second makes the photo.
 const INSTANT_FX = [
@@ -909,6 +924,7 @@ uniform sampler2D uMask;     // AI skin mask for the region uMaskCrop of the fra
 uniform vec4 uMaskCrop;
 uniform float uSkin;
 uniform vec2 uRetouchLod;    // AI skin retouch: mip levels of the texture scale and of the blemish scale, set by face size
+uniform vec3 uRetouch;       // AI skin retouch strength: light evened, colour evened, the light swing still taken as a blemish
 uniform sampler3D uLut;
 uniform float uLutSize;
 uniform vec3 uLutMin;
@@ -1092,8 +1108,8 @@ void main() {
       vec3 band = log2(max(softAt(src, uRetouchLod.x), 1e-4)) - log2(max(softAt(src, uRetouchLod.y), 1e-4));
       float l = dot(band, LUMA);
       vec3 c = band - l;                                      // the band's colour, apart from its light
-      float evenL = 0.78 * exp(-pow(abs(l) / 0.6, 2.0));      // most of a blemish, none of an eye or brow
-      float evenC = 0.9 * exp(-pow(abs(l) / 0.85, 2.0)) * exp(-pow(length(c) / 0.5, 2.0)); // lips keep their colour
+      float evenL = uRetouch.x * exp(-pow(abs(l) / uRetouch.z, 2.0));   // blemishes, but not eyes or brows
+      float evenC = uRetouch.y * exp(-pow(abs(l) / (uRetouch.z * 1.4), 2.0)) * exp(-pow(length(c) / 0.5, 2.0)); // lips keep their colour
       lin *= exp2(-(l * evenL + c * evenC) * skin);
     }
   }
@@ -1215,7 +1231,7 @@ function initGL() {
 
 // The main program for an Instant effect (0 = none). Each effect is compiled into its own program with FX
 // set, so a shader carries only the code it runs; they are built the first time they're needed.
-const MAIN_UNIFORMS = ['uCrop', 'uFlip', 'uTurn', 'uImage', 'uLut', 'uLutSize', 'uLutMin', 'uLutMax', 'uInput', 'uExpandA', 'uExposure', 'uWB', 'uGrain', 'uSeed', 'uAspect', 'uVignette', 'uFalseColor', 'uFocusPt', 'uFocusPrev', 'uFocusMix', 'uTexSize', 'uCropShortPx', 'uBlurPx', 'uSnap', 'uSnapCrop', 'uSnapMix', 'uMask', 'uMaskCrop', 'uSkin', 'uRetouchLod', 'uHdr', 'uHdrLod', 'uGlow', 'uGlowLod', 'uGlowTex', 'uGlowScale', 'uFxTurn', 'uFxMirror', 'uFirst', 'uFirstCrop', 'uFirstOn'];
+const MAIN_UNIFORMS = ['uCrop', 'uFlip', 'uTurn', 'uImage', 'uLut', 'uLutSize', 'uLutMin', 'uLutMax', 'uInput', 'uExpandA', 'uExposure', 'uWB', 'uGrain', 'uSeed', 'uAspect', 'uVignette', 'uFalseColor', 'uFocusPt', 'uFocusPrev', 'uFocusMix', 'uTexSize', 'uCropShortPx', 'uBlurPx', 'uSnap', 'uSnapCrop', 'uSnapMix', 'uMask', 'uMaskCrop', 'uSkin', 'uRetouchLod', 'uRetouch', 'uHdr', 'uHdrLod', 'uGlow', 'uGlowLod', 'uGlowTex', 'uGlowScale', 'uFxTurn', 'uFxMirror', 'uFirst', 'uFirstCrop', 'uFirstOn'];
 function programFor(fx) {
   if (GL.variants.has(fx)) return GL.variants.get(fx);
   const prog = gl.createProgram();
@@ -1459,9 +1475,10 @@ function draw(w, h, { capture = false, mirror = false, turn = 0, geom = geo, foc
   gl.uniform1f(u.uSkin, skinOn ? 1 : 0);
   gl.uniform4fv(u.uMaskCrop, maskCrop);
   // The retouch scales with the size of the faces: about the square root of how much of the picture is skin.
-  // Texture is finer than about 1/250 of a face, blemishes and blotches up to about 1/40.
-  const faceH = Math.min(0.8, Math.max(0.08, Math.sqrt(skinCover))) * visH;
-  gl.uniform2f(u.uRetouchLod, Math.log2(Math.max(1, faceH / 250)), Math.log2(Math.max(1, faceH / 40)));
+  // Texture (pores) is finer than about 1/400 of a face and is left alone; blemishes and blotches reach about 1/45.
+  const faceH = Math.min(0.8, Math.max(0.08, Math.sqrt(skinCover))) * visH, rt = RETOUCH[state.retouch] || RETOUCH.natural;
+  gl.uniform2f(u.uRetouchLod, Math.log2(Math.max(1, faceH / 400)), Math.log2(Math.max(1, faceH / 45)));
+  gl.uniform3f(u.uRetouch, rt.light, rt.colour, rt.feature);
   gl.activeTexture(gl.TEXTURE1);
   gl.bindTexture(gl.TEXTURE_3D, lut.tex);
   gl.activeTexture(gl.TEXTURE2);
@@ -3023,6 +3040,9 @@ function syncSettings() {
   for (const b of $('hdrSeg').children) b.setAttribute('aria-checked', String(b.dataset.v === state.hdr));
   $('hdrNote').textContent = 'Brings bright skies down and opens up shadows, keeping detail. iPhone doesn’t let web apps shoot several exposures, so this tone-maps each frame.';
   $('skinSwitch').setAttribute('aria-checked', String(state.skin));
+  for (const b of $('retouchSeg').children) b.setAttribute('aria-checked', String(b.dataset.v === state.retouch));
+  $('retouchField').hidden = !state.skin;
+  $('retouchNote').textContent = (RETOUCH[state.retouch] || RETOUCH.natural).note;
   $('skinNote').textContent = !state.skin ? 'Off: skin isn’t retouched.'
     : aiStatus === 'loading' ? 'Loading the AI model (about 27 MB, first time only)…'
     : aiStatus === 'failed' ? 'The AI model couldn’t load here. Open the app from its web address and try again.'
@@ -3071,6 +3091,13 @@ $('skinSwitch').addEventListener('click', () => {
   if (state.skin) loadSkinAI();
   maskSig = '';
   syncSettings(); syncAiTag(); requestRender();
+});
+$('retouchSeg').addEventListener('click', (e) => {
+  const b = e.target.closest('button');
+  if (!b || b.dataset.v === state.retouch) return;
+  state.retouch = b.dataset.v;
+  prefs.set('retouch', state.retouch);
+  syncSettings(); requestRender();
 });
 $('afSpeedSeg').addEventListener('click', (e) => {
   const b = e.target.closest('button'); if (!b) return;
